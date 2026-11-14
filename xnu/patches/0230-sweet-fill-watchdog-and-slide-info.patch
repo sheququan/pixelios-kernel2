@@ -1,0 +1,121 @@
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -7718,6 +7718,55 @@ done:
+ #ifndef PREVENT_CALLER_STACK_USE
+ #define PREVENT_CALLER_STACK_USE __attribute__((noinline))
+ #endif
++/*
++ * SWEET (0230): the forced fill can stop dead without panicking.  R94's QR log
++ * ends at two zero blocks of the launchd entry page and nothing follows for the
++ * next two minutes: the exec thread is stuck inside the loop, the panel keeps
++ * showing the same QR, and a stuck boot looks exactly like a slow one.  Watch
++ * the loop position from a thread and panic (loop state + stack on the panel)
++ * when it stops moving.
++ */
++static _Atomic uint64_t sweet_fill_pos;
++static _Atomic uint64_t sweet_fill_off;
++static _Atomic uint32_t sweet_fill_on;
++static int sweet_fill_wd_started;
++static int sweet_fill_chan;
++
++static void
++sweet_fill_watchdog(void *arg, wait_result_t wr)
++{
++	uint64_t last = ~(uint64_t)0;
++	int still = 0;
++
++	(void)arg;
++	(void)wr;
++	for (;;) {
++		(void)tsleep(&sweet_fill_chan, PZERO, "sweetfill", hz);
++		if (!sweet_fill_on) {
++			last = ~(uint64_t)0;
++			still = 0;
++			continue;
++		}
++		uint64_t pos = sweet_fill_pos;
++
++		if (pos == last) {
++			/* Say it, do not panic: a panic stops this thread and the
++			 * QR channel with it, while a stuck boot keeps the panel
++			 * and the stream alive.  One line every ~4 s is cheap. */
++			if (++still >= 4) {
++				printf("SWEET STALL: pos %llu off %#llx n %d\n",
++				    (unsigned long long)pos,
++				    (unsigned long long)sweet_fill_off,
++				    still);
++				still = 0;
++			}
++		} else {
++			last = pos;
++			still = 0;
++		}
++	}
++}
++
+ static void PREVENT_CALLER_STACK_USE
+ exec_prefault_data(proc_t p __unused, struct image_params *imgp, load_result_t *load_result)
+ {
+@@ -7829,6 +7878,16 @@ exec_prefault_data(proc_t p __unused, struct image_params *imgp, load_result_t *
+ 			sweet_tgt_pm = get_task_pmap(proc_task(p));
+ 			sweet_wr_reset();
+ 			sweet_fill_idx = 0;
++			if (!sweet_fill_wd_started) {
++				thread_t wd_thr = THREAD_NULL;
++
++				sweet_fill_wd_started = 1;
++				(void)kernel_thread_start(sweet_fill_watchdog, NULL,
++				    &wd_thr);
++				if (wd_thr != THREAD_NULL) {
++					thread_deallocate(wd_thr);
++				}
++			}
+ 			for (si = 0; si < sweet_seg_count && si < 32; si++) {
+ 				struct vnode *svp = sweet_seg_vp[si];
+ 				uint64_t va = sweet_seg_va[si];
+@@ -7853,6 +7912,12 @@ exec_prefault_data(proc_t p __unused, struct image_params *imgp, load_result_t *
+ 					    ((va + pos) & (uint64_t)(PAGE_SIZE - 1)));
+ 					int rerr, cerr;
+ 
++					/* 0230: heartbeat for the watchdog above. */
++					sweet_fill_off = off + pos;
++					sweet_fill_pos = (uint64_t)si * 0x100000ULL +
++					    (pos >> 12);
++					sweet_fill_on = 1;
++
+ 					if (n > left - pos) {
+ 						n = (size_t)(left - pos);
+ 					}
+@@ -8199,6 +8264,7 @@ exec_prefault_data(proc_t p __unused, struct image_params *imgp, load_result_t *
+ 					}
+ 				}
+ 			}
++			sweet_fill_on = 0;      /* 0230: the loop is done */
+ 			{
+ 				uint32_t chk[4] = { 0, 0, 0, 0 };
+ 				int ck = copyin((user_addr_t)load_result->entry_point,
+--- a/osfmk/vm/vm_shared_region.c
++++ b/osfmk/vm/vm_shared_region.c
+@@ -2597,6 +2597,22 @@ vm_shared_region_slide_mapping(
+ 		goto done;
+ 	}
+ 
++	/*
++	 * SWEET (0230): the sanity check is silent for v2/v4 when page_size
++	 * disagrees, so a failure here says nothing about the blob.  Print the
++	 * header the way the checks read it: all-zero words mean the copyin
++	 * source is the zero page (the fill/read problem), a sane version with
++	 * a wrong page_size means dyld handed us a v1-style or stale blob, and
++	 * a nonsense delta_mask points at corrupted cache contents.
++	 */
++	{
++		const uint32_t *sw = (const uint32_t *)slide_info_entry;
++
++		printf("SWEET SLIDE: addr %#llx size %#llx slide %#x w %08x %08x %08x %08x %08x %08x %08x %08x\n",
++		    (unsigned long long)slide_info_addr,
++		    (unsigned long long)slide_info_size, slide,
++		    sw[0], sw[1], sw[2], sw[3], sw[4], sw[5], sw[6], sw[7]);
++	}
+ 	if ((kr = vm_shared_region_slide_sanity_check(slide_info_entry, slide_info_size)) != KERN_SUCCESS) {
+ 		printf("Sanity Check failed for slide_info\n");
+ 		goto done;
