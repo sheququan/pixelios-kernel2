@@ -1,0 +1,81 @@
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -7918,6 +7918,11 @@ exec_prefault_data(proc_t p __unused, struct image_params *imgp, load_result_t *
+ 					sweet_fill_pos = (uint64_t)si * 0x100000ULL +
+ 					    (pos >> 12);
+ 					sweet_fill_on = 1;
++					/* 0233: the QL2 reducer drops lines that differ
++					 * only in digits from a recent one, so every
++					 * marker carries a page-derived letter pair. */
++					char pl = (char)('A' + (int)(((off + pos) >> 12) / 26 % 26));
++					char pm = (char)('A' + (int)(((off + pos) >> 12) % 26));
+ 
+ 					if (n > left - pos) {
+ 						n = (size_t)(left - pos);
+@@ -7947,7 +7952,8 @@ exec_prefault_data(proc_t p __unused, struct image_params *imgp, load_result_t *
+ 							int tr = sweet_fill_trace < 24;
+ 
+ 							if (tr) {
+-								printf("SWEET FT0: off %#llx bi %d\n",
++								printf("SWEET FT0%c%c: off %#llx bi %d\n",
++								    pl, pm,
+ 								    (unsigned long long)(off + pos), bi);
+ 							}
+ 							int se = VNOP_BLOCKMAP(svp,
+@@ -7959,13 +7965,15 @@ exec_prefault_data(proc_t p __unused, struct image_params *imgp, load_result_t *
+ 							if (se || sub_bpn < 0) {
+ 								rerr = EINVAL;
+ 								if (tr) {
+-									printf("SWEET FT1: blkmap se %d bpn %#llx\n",
+-									    se, (unsigned long long)sub_bpn);
++									printf("SWEET FT1%c%c: blkmap se %d bpn %#llx\n",
++									    pl, pm, se,
++									    (unsigned long long)sub_bpn);
+ 								}
+ 								break;
+ 							}
+ 							if (tr) {
+-								printf("SWEET FT1: blk %#llx run %zu\n",
++								printf("SWEET FT1%c%c: blk %#llx run %zu\n",
++								    pl, pm,
+ 								    (unsigned long long)sub_bpn, sub_run);
+ 							}
+ 							rerr |= sweet_ufs_read_at(sub_bpn,
+@@ -7973,7 +7981,8 @@ exec_prefault_data(proc_t p __unused, struct image_params *imgp, load_result_t *
+ 							    sweet_page +
+ 							    bi * (PAGE_SIZE / 4));
+ 							if (tr) {
+-								printf("SWEET FT2: rerr %d\n", rerr);
++								printf("SWEET FT2%c%c: rerr %d\n",
++								    pl, pm, rerr);
+ 							}
+ 							/* SWEET (R88): F144 needs the
+ 							 * block-map answers for the 8 chunks of
+@@ -8024,7 +8033,7 @@ exec_prefault_data(proc_t p __unused, struct image_params *imgp, load_result_t *
+ 						break;
+ 					}
+ 					if (sweet_fill_trace < 24) {
+-						printf("SWEET FT3: before copyout\n");
++						printf("SWEET FT3%c%c: before copyout\n", pl, pm);
+ 					}
+ 					cerr = copyout(sweet_page,
+ 					    (user_addr_t)(va + pos), (vm_size_t)n);
+@@ -8032,15 +8041,15 @@ exec_prefault_data(proc_t p __unused, struct image_params *imgp, load_result_t *
+ 						co_bad++;
+ 					}
+ 					if (sweet_fill_trace < 24) {
+-						printf("SWEET FT4: copyout %d\n", cerr);
++						printf("SWEET FT4%c%c: copyout %d\n", pl, pm, cerr);
+ 						sweet_fill_trace++;
+ 					}
+ 					/* SWEET (0232): one line per filled page, for
+ 					 * every page, so the last line of a stuck boot
+ 					 * says how far the fill got.  ~91 lines in
+ 					 * total, a couple of QR blocks. */
+-					printf("SWEET FP: off %#llx rerr %d co %d\n",
+-					    (unsigned long long)(off + pos), rerr, cerr);
++					printf("SWEET FP%c%c: off %#llx rerr %d co %d\n",
++					    pl, pm, (unsigned long long)(off + pos), rerr, cerr);
+ 					{
+ 						uint32_t g[2] = { 0, 0 };
+ 						uint32_t *w = (uint32_t *)(void *)sweet_page;
