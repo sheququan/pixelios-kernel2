@@ -24,22 +24,3 @@
  	if (upl->flags & UPL_SET_DIRTY) {
  		flags |= UPL_COMMIT_SET_DIRTY;
  	}
-@@ -7742,11 +7752,18 @@ process_upl_to_commit:
- 	entry = offset / PAGE_SIZE;
- 	target_offset = (vm_object_offset_t)offset;
- 
-+	if (upl->u_size >= 0x1c000) {
-+		printf("SWEET UPLC3: object %p owned %d\n", (void *)shadow_object,
-+		    (int)vm_object_lock_owned(shadow_object));
-+	}
- 	if (upl->flags & UPL_KERNEL_OBJECT) {
- 		vm_object_lock_shared(shadow_object);
- 	} else {
- 		vm_object_lock(shadow_object);
- 	}
-+	if (upl->u_size >= 0x1c000) {
-+		printf("SWEET UPLC4: object locked\n");
-+	}
- 
- 	VM_OBJECT_WIRED_PAGE_UPDATE_START(shadow_object);
- 
