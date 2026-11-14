@@ -1,0 +1,87 @@
+--- a/bsd/dev/sweet_qr.c
++++ b/bsd/dev/sweet_qr.c
+@@ -203,18 +203,83 @@ sweet_qr1_loop(void)
+ static qs_t sweet_qs;
+ static char sweet_qr_text[QS_TILES_MAX][QS_TEXT_MAX + 1];
+ 
++/*
++ * SWEET (0229): the per-page FILL/UPL/COMMIT traces were written for single
++ * rounds and now print tens of thousands of lines per boot, which buries the
++ * boot skeleton (mount, exec, FILL3, REBASE/RAWFIX/RAWCHK, CS, panic) in the QR
++ * stream: every attempt to decode a boot stopped in the middle of the trace.
++ * The console ring keeps every byte (the writers are untouched); the stream is
++ * fed one line at a time here and the noisy lines are dropped.  The stream
++ * position is a counter of the bytes actually fed, so qs_feed() never turns a
++ * dropped line into an "[log overrun]" marker.
++ * Boot-arg sweetlogall=1 disables the filter.
++ */
++static const char *const sweet_qr2_quiet[] = {
++	"SWEET UPLOBJ:", "SWEET COMMIT:", "SWEET COMMITPAGE:", "SWEET COMMITLITE:",
++	"SWEET CLCOMMIT:", "SWEET CLFLAGS:", "SWEET CLDONE:", "SWEET UPLPHYS:",
++	"SWEET PAGEIN:", "SWEET ZCHUNK:", "SWEET ZPAGE:", "SWEET CACHE:",
++	"SWEET BUFMAP:", "SWEET UFSREAD:", "SWEET UPLMAP:", "SWEET MAPSEG:",
++	"SWEET TLBFIX:", "SWEET USERPHYS:", "SWEET UBCOBJ:", "SWEET PMAPFILL:",
++	"SWEET FILLPAGE:", "SWEET OBJFILL:", "SWEET VB:", "SWEET WIRE:",
++	"SWEET UFS: RD ", "SWEET CS: dyld sig off", "SWEET CS: launchd sig off",
++	"SWEET CS: launchd v_size", "SWEET CS: dyld v_size",
++	NULL
++};
++static char sweet_qr2_line[512];
++static uint32_t sweet_qr2_linelen;
++static uint64_t sweet_qr2_fed_off;
++static int sweet_qr2_all;       /* sweetlogall=1: feed everything */
++
++static int
++sweet_qr2_line_is_quiet(const char *l, uint32_t n)
++{
++	if (sweet_qr2_all) {
++		return 0;
++	}
++	for (int i = 0; sweet_qr2_quiet[i] != NULL; i++) {
++		const char *p = sweet_qr2_quiet[i];
++		uint32_t k = 0;
++		while (p[k] != '\0') {
++			k++;
++		}
++		if (k <= n && memcmp(l, p, k) == 0) {
++			return 1;
++		}
++	}
++	return 0;
++}
++
+ /* Feed the console bytes written since the last call into the stream (at most `budget` per call). */
+ static void
+ sweet_qr2_pump(uint64_t *pos, uint32_t budget, uint32_t *fed)
+ {
+ 	static char copy[1024];
+ 
++	if (!sweet_qr2_all && PE_state.bootArgs != NULL) {
++		int v = 0;
++		if (PE_parse_boot_argn("sweetlogall", &v, sizeof(v)) && v != 0) {
++			sweet_qr2_all = 1;
++		}
++	}
+ 	while (budget) {
+ 		uint32_t n = sweet_log_copy(pos, copy, (uint32_t)MIN((uint32_t)sizeof(copy), budget));
+ 		if (n == 0) {
+ 			break;
+ 		}
+-		qs_feed(&sweet_qs, *pos - n, copy, n);
++		for (uint32_t i = 0; i < n; i++) {
++			char c = copy[i];
++			if (sweet_qr2_linelen < sizeof(sweet_qr2_line) - 1) {
++				sweet_qr2_line[sweet_qr2_linelen++] = c;
++			}
++			if (c != '\n') {
++				continue;
++			}
++			if (!sweet_qr2_line_is_quiet(sweet_qr2_line, sweet_qr2_linelen)) {
++				qs_feed(&sweet_qs, sweet_qr2_fed_off, sweet_qr2_line, sweet_qr2_linelen);
++				sweet_qr2_fed_off += sweet_qr2_linelen;
++			}
++			sweet_qr2_linelen = 0;
++		}
+ 		*fed += n;
+ 		budget -= n;
+ 	}
