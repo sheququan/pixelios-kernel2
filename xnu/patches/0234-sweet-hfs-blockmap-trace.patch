@@ -1,0 +1,51 @@
+--- a/bsd/sweet_hfs/core/hfs_readwrite.c
++++ b/bsd/sweet_hfs/core/hfs_readwrite.c
+@@ -3335,10 +3335,25 @@ hfs_vnop_blockmap(struct vnop_blockmap_args *ap)
+ 	fp = VTOF(vp);
+ 
+ 	if ( !vnode_issystem(vp) && !vnode_islnk(vp) && !vnode_isswap(vp)) {
++		/* SWEET (0234): the exec fill stops dead inside this call for
++		 * launchd's page 0x4c000 (last line SWEET FT0xx on the QR log).
++		 * Bracket the two things that can block here: the cnode lock and
++		 * the invalid-range scan. */
++		int sw_bm = (ap->a_foffset >= 0x4c000 && ap->a_foffset < 0x4d000);
++
++		if (sw_bm) {
++			printf("SWEET BM0: off %#llx size %llu owner %p me %p took %d\n",
++			    (unsigned long long)ap->a_foffset,
++			    (unsigned long long)ap->a_size,
++			    (void *)cp->c_lockowner, (void *)current_thread(), 0);
++		}
+ 		if (cp->c_lockowner != current_thread()) {
+ 			hfs_lock(VTOC(vp), HFS_EXCLUSIVE_LOCK, HFS_LOCK_ALLOW_NOEXISTS);
+ 			tooklock = 1;
+ 		}
++		if (sw_bm) {
++			printf("SWEET BM1: locked took %d\n", tooklock);
++		}
+ 
+ 		// For reads, check the invalid ranges
+ 		if (ISSET(ap->a_flags, VNODE_READ)) {
+@@ -3347,6 +3362,11 @@ hfs_vnop_blockmap(struct vnop_blockmap_args *ap)
+ 				goto exit;
+ 			}
+ 
++			if (sw_bm) {
++				printf("SWEET BM2: rl_scan head %p size %#llx\n",
++				    (void *)TAILQ_FIRST(&fp->ff_invalidranges),
++				    (unsigned long long)fp->ff_size);
++			}
+ 			overlaptype = rl_scan(&fp->ff_invalidranges, ap->a_foffset,
+ 								  ap->a_foffset + (off_t)bytesContAvail - 1,
+ 								  &invalid_range);
+@@ -3406,6 +3426,10 @@ hfs_vnop_blockmap(struct vnop_blockmap_args *ap)
+ 				case RL_NOOVERLAP:
+ 					break;
+ 			} // switch
++			if (sw_bm) {
++				printf("SWEET BM3: ovl %d bytes %llu\n", (int)overlaptype,
++				    (unsigned long long)bytesContAvail);
++			}
+ 		}
+ 	}
+ 
