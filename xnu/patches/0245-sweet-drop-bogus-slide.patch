@@ -1,0 +1,58 @@
+--- a/bsd/vm/vm_unix.c
++++ b/bsd/vm/vm_unix.c
+@@ -2734,27 +2734,41 @@ _shared_region_map_and_slide(
+ 	 * apart from "the syscall failed before the success print".
+ 	 */
+ 	printf("SWEET SRMAP: enter files %u mappings %u\n", files_count, mappings_count);
+-	/* SWEET (0244): the slide_info blob dyld hands us is all zero words at an
+-	 * address that is not page aligned (SWEET SLIDE in R103).  Print only the
+-	 * mapping that covers that address, with the file offset it implies, so
+-	 * the cache file can be checked in the image offline.  One or two lines
+-	 * instead of 48 keeps the QR stream short enough to decode whole. */
++	/* SWEET (0244/0245): this cache has no slide info at all (F161: the
++	 * pristine extraction has no v1..v5 blob) while dyld still hands a
++	 * slide_start outside every mapping (F162: 0x239913c08 is past the end
++	 * of the shared region).  The sanity check rejects that and takes the
++	 * whole mapping down, so dyld loses the cache and userland dies.  Drop
++	 * slide requests that cannot be real and let the cache map as-is. */
++	uint32_t sw_noslide = 0;
++
+ 	for (uint32_t swi = 0; swi < mappings_count && swi < 64; swi++) {
+ 		uint64_t va = mappings[swi].sms_address;
+ 		uint64_t end = va + mappings[swi].sms_size;
+ 		uint64_t sa = mappings[swi].sms_slide_start;
++		uint64_t ss = mappings[swi].sms_slide_size;
+ 
+-		if (sa == 0 || sa < va || sa >= end) {
++		if (sa == 0 && ss == 0) {
++			continue;
++		}
++		if (sa >= va && sa < end && ss != 0 &&
++		    (sa - va) + ss <= mappings[swi].sms_size) {
++			printf("SWEET SRMX: va %#llx size %#llx foff %#llx slide %#llx/%#llx\n",
++			    (unsigned long long)va,
++			    (unsigned long long)mappings[swi].sms_size,
++			    (unsigned long long)mappings[swi].sms_file_offset,
++			    (unsigned long long)sa, (unsigned long long)ss);
+ 			continue;
+ 		}
+-		printf("SWEET SRMX: va %#llx size %#llx foff %#llx slide %#llx/%#llx -> foff %#llx\n",
+-		    (unsigned long long)va,
+-		    (unsigned long long)mappings[swi].sms_size,
+-		    (unsigned long long)mappings[swi].sms_file_offset,
+-		    (unsigned long long)sa,
+-		    (unsigned long long)mappings[swi].sms_slide_size,
+-		    (unsigned long long)(mappings[swi].sms_file_offset +
+-		    (sa - va)));
++		mappings[swi].sms_slide_start = 0;
++		mappings[swi].sms_slide_size = 0;
++		mappings[swi].sms_max_prot &= ~VM_PROT_SLIDE;
++		sw_noslide++;
++	}
++	if (sw_noslide != 0) {
++		printf("SWEET SRNOSLIDE: dropped %u slide request(s), region %#llx+%#llx\n",
++		    sw_noslide, (unsigned long long)0x180000000ULL,
++		    (unsigned long long)0xaade8000ULL);
+ 	}
+ 	/*
+ 	 * Turn files, mappings into sr_file_mappings and other setup.
