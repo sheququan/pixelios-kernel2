@@ -1,0 +1,74 @@
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -7870,6 +7870,7 @@ exec_prefault_data(proc_t p __unused, struct image_params *imgp, load_result_t *
+ 			 * lesson). */
+ 			static char sweet_fill_raw[129 * PAGE_SIZE];
+ 			static int sweet_fill_idx = 0;
++			static int sweet_fill_trace = 0;
+ 			pmap_t sweet_cur_pm, sweet_tgt_pm;
+ 			char *sweet_fb = (char *)(((uintptr_t)sweet_fill_raw +
+ 			    PAGE_SIZE - 1) & ~(uintptr_t)(PAGE_SIZE - 1));
+@@ -7935,6 +7936,20 @@ exec_prefault_data(proc_t p __unused, struct image_params *imgp, load_result_t *
+ 						for (bi = 0; bi < nb && bi < 4; bi++) {
+ 							daddr64_t sub_bpn = 0;
+ 							size_t sub_run = 0;
++							/* SWEET (0231): the fill dies
++							 * between two chunks without a
++							 * panic and without the watchdog
++							 * getting a word in (cpus=1: a
++							 * spinning thread starves it).
++							 * Bracket every step of the first
++							 * few chunks so the last line on
++							 * the QR stream names the call. */
++							int tr = sweet_fill_trace < 24;
++
++							if (tr) {
++								printf("SWEET FT0: off %#llx bi %d\n",
++								    (unsigned long long)(off + pos), bi);
++							}
+ 							int se = VNOP_BLOCKMAP(svp,
+ 							    (off_t)(off + pos) +
+ 							    bi * (PAGE_SIZE / 4),
+@@ -7943,12 +7958,23 @@ exec_prefault_data(proc_t p __unused, struct image_params *imgp, load_result_t *
+ 							    imgp->ip_vfs_context);
+ 							if (se || sub_bpn < 0) {
+ 								rerr = EINVAL;
++								if (tr) {
++									printf("SWEET FT1: blkmap se %d bpn %#llx\n",
++									    se, (unsigned long long)sub_bpn);
++								}
+ 								break;
+ 							}
++							if (tr) {
++								printf("SWEET FT1: blk %#llx run %zu\n",
++								    (unsigned long long)sub_bpn, sub_run);
++							}
+ 							rerr |= sweet_ufs_read_at(sub_bpn,
+ 							    (uint32_t)(PAGE_SIZE / 4),
+ 							    sweet_page +
+ 							    bi * (PAGE_SIZE / 4));
++							if (tr) {
++								printf("SWEET FT2: rerr %d\n", rerr);
++							}
+ 							/* SWEET (R88): F144 needs the
+ 							 * block-map answers for the 8 chunks of
+ 							 * dyld's __DATA_CONST on the record, to
+@@ -7997,11 +8023,18 @@ exec_prefault_data(proc_t p __unused, struct image_params *imgp, load_result_t *
+ 						rd_bad++;
+ 						break;
+ 					}
++					if (sweet_fill_trace < 24) {
++						printf("SWEET FT3: before copyout\n");
++					}
+ 					cerr = copyout(sweet_page,
+ 					    (user_addr_t)(va + pos), (vm_size_t)n);
+ 					if (cerr) {
+ 						co_bad++;
+ 					}
++					if (sweet_fill_trace < 24) {
++						printf("SWEET FT4: copyout %d\n", cerr);
++						sweet_fill_trace++;
++					}
+ 					{
+ 						uint32_t g[2] = { 0, 0 };
+ 						uint32_t *w = (uint32_t *)(void *)sweet_page;
