@@ -1,0 +1,11 @@
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -7949,7 +7949,7 @@ exec_prefault_data(proc_t p __unused, struct image_params *imgp, load_result_t *
+ 							 * Bracket every step of the first
+ 							 * few chunks so the last line on
+ 							 * the QR stream names the call. */
+-							int tr = sweet_fill_trace < 24;
++							int tr = sweet_fill_trace < 8;
+ 
+ 							if (tr) {
+ 								printf("SWEET FT0%c%c: off %#llx bi %d\n",
