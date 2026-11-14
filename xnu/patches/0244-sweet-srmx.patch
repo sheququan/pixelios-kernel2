@@ -1,0 +1,42 @@
+--- a/bsd/vm/vm_unix.c
++++ b/bsd/vm/vm_unix.c
+@@ -2734,22 +2734,28 @@ _shared_region_map_and_slide(
+ 	 * apart from "the syscall failed before the success print".
+ 	 */
+ 	printf("SWEET SRMAP: enter files %u mappings %u\n", files_count, mappings_count);
+-	/* SWEET (0240): the slide_info blob dyld hands us is all zero words and
+-	 * its address is not page aligned (SWEET SLIDE in R103).  Print every
+-	 * mapping so the address can be matched to a file and a file offset
+-	 * offline: the cache's relocation data then can be checked in the image
+-	 * instead of guessed at. */
++	/* SWEET (0244): the slide_info blob dyld hands us is all zero words at an
++	 * address that is not page aligned (SWEET SLIDE in R103).  Print only the
++	 * mapping that covers that address, with the file offset it implies, so
++	 * the cache file can be checked in the image offline.  One or two lines
++	 * instead of 48 keeps the QR stream short enough to decode whole. */
+ 	for (uint32_t swi = 0; swi < mappings_count && swi < 64; swi++) {
+-		printf("SWEET SRM%u: va %#llx size %#llx off %#llx sl %#llx/%#llx prot %#x\n",
+-		    swi,
+-		    (unsigned long long)mappings[swi].sms_address,
++		uint64_t va = mappings[swi].sms_address;
++		uint64_t end = va + mappings[swi].sms_size;
++		uint64_t sa = mappings[swi].sms_slide_start;
++
++		if (sa == 0 || sa < va || sa >= end) {
++			continue;
++		}
++		printf("SWEET SRMX: va %#llx size %#llx foff %#llx slide %#llx/%#llx -> foff %#llx\n",
++		    (unsigned long long)va,
+ 		    (unsigned long long)mappings[swi].sms_size,
+ 		    (unsigned long long)mappings[swi].sms_file_offset,
+-		    (unsigned long long)mappings[swi].sms_slide_start,
++		    (unsigned long long)sa,
+ 		    (unsigned long long)mappings[swi].sms_slide_size,
+-		    (unsigned)mappings[swi].sms_max_prot);
++		    (unsigned long long)(mappings[swi].sms_file_offset +
++		    (sa - va)));
+ 	}
+-
+ 	/*
+ 	 * Turn files, mappings into sr_file_mappings and other setup.
+ 	 */
