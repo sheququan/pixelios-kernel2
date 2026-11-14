@@ -1,0 +1,15 @@
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -8035,6 +8035,12 @@ exec_prefault_data(proc_t p __unused, struct image_params *imgp, load_result_t *
+ 						printf("SWEET FT4: copyout %d\n", cerr);
+ 						sweet_fill_trace++;
+ 					}
++					/* SWEET (0232): one line per filled page, for
++					 * every page, so the last line of a stuck boot
++					 * says how far the fill got.  ~91 lines in
++					 * total, a couple of QR blocks. */
++					printf("SWEET FP: off %#llx rerr %d co %d\n",
++					    (unsigned long long)(off + pos), rerr, cerr);
+ 					{
+ 						uint32_t g[2] = { 0, 0 };
+ 						uint32_t *w = (uint32_t *)(void *)sweet_page;
