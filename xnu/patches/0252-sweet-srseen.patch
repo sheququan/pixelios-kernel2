@@ -1,3 +1,38 @@
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -50,6 +50,10 @@ static void     arm_prepare_u32_syscall_return(const struct sysent *, arm_saved_
+ static void     arm_prepare_syscall_return(const struct sysent *, struct arm_saved_state *, uthread_t, int);
+ static unsigned short arm_get_syscall_number(struct arm_saved_state *);
+ static void     arm_trace_unix_syscall(int, struct arm_saved_state *);
++
++int sweet_seen_438;
++int sweet_seen_536;
++int sweet_seen_294;
+ static void     arm_clear_syscall_error(struct arm_saved_state *);
+ #define save_r0         r[0]
+ #define save_r1         r[1]
+@@ -101,6 +105,21 @@ unix_syscall(
+ 	uthread_reset_proc_refcount(uthread);
+ 
+ 	code = arm_get_syscall_number(state);
++	/* SWEET (0252): dyld4 on iOS 16 may use the retired
++	 * shared_region_map_and_slide_np (438) instead of _2_np (536); 438 is
++	 * nosys here, so the cache never gets mapped and dyld silently drops the
++	 * shared cache.  Remember which ones were seen. */
++	{
++		extern int sweet_seen_438, sweet_seen_536, sweet_seen_294;
++
++		if (code == 438) {
++			sweet_seen_438++;
++		} else if (code == 536) {
++			sweet_seen_536++;
++		} else if (code == 294) {
++			sweet_seen_294++;
++		}
++	}
+ 
+ #define unix_syscall_kprintf(x...)      /* kprintf("unix_syscall: " x) */
+ 
 --- a/bsd/vm/vm_unix.c
 +++ b/bsd/vm/vm_unix.c
 @@ -2082,6 +2082,15 @@ SYSCTL_INT(_vm, OID_AUTO, shared_region_persistence, CTLFLAG_RW | CTLFLAG_LOCKED
@@ -16,7 +51,7 @@
  int
  shared_region_check_np(
  	__unused struct proc                    *p,
-@@ -2124,6 +2133,20 @@ shared_region_check_np(
+@@ -2124,6 +2133,26 @@ shared_region_check_np(
  			/* retrieve address of its first mapping... */
  			kr = vm_shared_region_start_address(shared_region, &start_address, task);
  			if (kr != KERN_SUCCESS) {
@@ -27,6 +62,12 @@
 +				{
 +					extern void sweet_sr_dump(void *sr);
 +
++					{
++						extern int sweet_seen_438, sweet_seen_536, sweet_seen_294;
++
++						printf("SWEET SRSEEN: sys438 %d sys536 %d sys294 %d\n",
++						    sweet_seen_438, sweet_seen_536, sweet_seen_294);
++					}
 +					printf("SWEET SRNOSTART: kr %d stage %d files %u maps %u "
 +					    "mapkr %d err %d noslide %u\n",
 +					    kr, sweet_srmap_stage, sweet_srmap_files,
@@ -37,7 +78,7 @@
  				SHARED_REGION_TRACE_ERROR(("shared_region: %p [%d(%s)] "
  				    "check_np(0x%llx) "
  				    "vm_shared_region_start_address() failed\n",
-@@ -2765,6 +2788,7 @@ _shared_region_map_and_slide(
+@@ -2765,6 +2794,7 @@ _shared_region_map_and_slide(
  		mappings[swi].sms_max_prot &= ~VM_PROT_SLIDE;
  		sw_noslide++;
  	}
@@ -45,7 +86,7 @@
  	if (sw_noslide != 0) {
  		printf("SWEET SRNOSLIDE: dropped %u slide request(s), region %#llx+%#llx\n",
  		    sw_noslide, (unsigned long long)0x180000000ULL,
-@@ -2820,6 +2844,9 @@ _shared_region_map_and_slide(
+@@ -2820,6 +2850,9 @@ _shared_region_map_and_slide(
  	 * told apart from the screen.
  	 */
  	printf("SWEET SRMAP: files %u map_kr %#x error %d\n", files_count, kr, error);
@@ -55,7 +96,7 @@
  
  	/*
  	 * Mark that this process is now using split libraries.
-@@ -2945,6 +2972,11 @@ shared_region_map_and_slide_2_np(
+@@ -2945,6 +2978,11 @@ shared_region_map_and_slide_2_np(
  
  	files_count = uap->files_count;
  	mappings_count = uap->mappings_count;
@@ -67,7 +108,7 @@
  
  	if (files_count == 0) {
  		SHARED_REGION_TRACE_INFO(
-@@ -2996,6 +3028,7 @@ shared_region_map_and_slide_2_np(
+@@ -2996,6 +3034,7 @@ shared_region_map_and_slide_2_np(
  		goto done;
  	}
  
@@ -75,7 +116,7 @@
  	kr = shared_region_copyin(p, uap->files, files_count, sizeof(shared_files[0]), shared_files);
  	if (kr != KERN_SUCCESS) {
  		goto done;
-@@ -3048,6 +3081,7 @@ shared_region_map_and_slide_2_np(
+@@ -3048,6 +3087,7 @@ shared_region_map_and_slide_2_np(
  		}
  	}
  
