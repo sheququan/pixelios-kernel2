@@ -1,3 +1,38 @@
+--- a/bsd/dev/sweet_qr.c
++++ b/bsd/dev/sweet_qr.c
+@@ -213,6 +213,32 @@ sweet_qr1_loop(void)
+ 			extern unsigned sweet_sc_count[1024];
+ 			static int sc_dumped;
+ 
++			{
++				extern void sweet_dump_pid1(void);
++				extern int sweet_pid1_stat(void);
++
++				sweet_dump_pid1();
++				/* SWEET (0259/0260): the ring stalls because init stopped, and
++				 * the machine resets within a second or two, so the panel barely
++				 * shows the tail.  Panic on purpose - but hand the panel back to
++				 * the console first, otherwise our last QR frame hides the panic
++				 * text (0259 did exactly that). */
++				sweet_console_muted = 0;
++				sweet_qr_hold = 0;
++				{
++					extern void sweet_log_replay(int lines);
++
++					/* SWEET (0265): panic text never reached the panel
++					 * (the QR frame owns the framebuffer).  Print the ring
++					 * tail through the console instead, then idle. */
++					printf("SWEET STALL: p_stat %d, replaying\n",
++					    sweet_pid1_stat());
++					sweet_log_replay(45);
++					for (;;) {
++						sweet_qr_nap(1000);
++					}
++				}
++			}
+ 			if (sc_dumped == 0) {
+ 				unsigned best[8] = { 0 };
+ 				int besti[8] = { 0 };
 --- a/bsd/dev/sweet_ufs.c
 +++ b/bsd/dev/sweet_ufs.c
 @@ -1235,7 +1235,10 @@ sweet_ufs_init(void)
@@ -12,7 +47,7 @@
  
  static char sweet_log_ring[SWEET_LOG_SIZE];
  static uint64_t _Atomic sweet_log_total;
-@@ -1273,6 +1276,59 @@ sweet_log_ts_on(void)
+@@ -1273,6 +1276,65 @@ sweet_log_ts_on(void)
  	return s == 2;
  }
  
@@ -29,6 +64,12 @@
 +
 +	if (lines <= 0 || total == 0) {
 +		return;
++	}
++	/* SWEET (0267): the panel still holds the fill/load log, so replaying
++	 * straight onto it produced two interleaved texts.  Push the old
++	 * content off the screen first. */
++	for (int i = 0; i < 60; i++) {
++		printf("\n");
 +	}
 +	n = (uint64_t)lines * 160;             /* generous: 160 bytes per line */
 +	if (n > total) {
@@ -72,38 +113,3 @@
  void
  sweet_log_append(const char *c, int size)
  {
---- a/bsd/dev/sweet_qr.c
-+++ b/bsd/dev/sweet_qr.c
-@@ -213,6 +213,32 @@ sweet_qr1_loop(void)
- 			extern unsigned sweet_sc_count[1024];
- 			static int sc_dumped;
- 
-+			{
-+				extern void sweet_dump_pid1(void);
-+				extern int sweet_pid1_stat(void);
-+
-+				sweet_dump_pid1();
-+				/* SWEET (0259/0260): the ring stalls because init stopped, and
-+				 * the machine resets within a second or two, so the panel barely
-+				 * shows the tail.  Panic on purpose - but hand the panel back to
-+				 * the console first, otherwise our last QR frame hides the panic
-+				 * text (0259 did exactly that). */
-+				sweet_console_muted = 0;
-+				sweet_qr_hold = 0;
-+				{
-+					extern void sweet_log_replay(int lines);
-+
-+					/* SWEET (0265): panic text never reached the panel
-+					 * (the QR frame owns the framebuffer).  Print the ring
-+					 * tail through the console instead, then idle. */
-+					printf("SWEET STALL: p_stat %d, replaying\n",
-+					    sweet_pid1_stat());
-+					sweet_log_replay(45);
-+					for (;;) {
-+						sweet_qr_nap(1000);
-+					}
-+				}
-+			}
- 			if (sc_dumped == 0) {
- 				unsigned best[8] = { 0 };
- 				int besti[8] = { 0 };
