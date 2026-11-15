@@ -1,0 +1,11 @@
+--- a/bsd/kern/sys_generic.c
++++ b/bsd/kern/sys_generic.c
+@@ -705,7 +705,7 @@ write_nocancel(struct proc *p, struct write_nocancel_args *uap, user_ssize_t *re
+ 	 * port the ring buffer only sees kprintf, so every dyld diagnostic is
+ 	 * invisible: capture writes to fd<3 from init and echo them into the log
+ 	 * (bounded, one line at a time). */
+-	if (uap->fd < 3 && proc_pid(p) == 1 && uap->nbyte > 0 && uap->nbyte < 512) {
++	if (proc_pid(p) == 1 && uap->nbyte > 0 && uap->nbyte < 512) {
+ 		static int sweet_wecho;
+ 		char kb[512];
+ 		size_t n = (size_t)uap->nbyte;
