@@ -1,0 +1,32 @@
+--- a/bsd/kern/sys_generic.c
++++ b/bsd/kern/sys_generic.c
+@@ -701,6 +701,29 @@ write_internal(struct proc *p, int fd, user_addr_t buf, user_size_t nbyte,
+ int
+ write_nocancel(struct proc *p, struct write_nocancel_args *uap, user_ssize_t *retval)
+ {
++	/* SWEET (0254): dyld/launchd talk to the console through fd 1/2.  On this
++	 * port the ring buffer only sees kprintf, so every dyld diagnostic is
++	 * invisible: capture writes to fd<3 from init and echo them into the log
++	 * (bounded, one line at a time). */
++	if (uap->fd < 3 && proc_pid(p) == 1 && uap->nbyte > 0 && uap->nbyte < 512) {
++		static int sweet_wecho;
++		char kb[512];
++		size_t n = (size_t)uap->nbyte;
++
++		if (sweet_wecho < 120 && copyin(uap->cbuf, kb, n) == 0) {
++			kb[n] = 0;
++			for (size_t i = 0; i < n; i++) {
++				if (kb[i] == '\n') {
++					kb[i] = 0;
++					break;
++				}
++			}
++			if (kb[0]) {
++				sweet_wecho++;
++				printf("SWEET W%d: %s\n", uap->fd, kb);
++			}
++		}
++	}
+ 	return write_internal(p, uap->fd, uap->cbuf, uap->nbyte, (off_t)-1, 0,
+ 	           NULL, retval);
+ }
