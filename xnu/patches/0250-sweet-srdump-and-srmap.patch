@@ -1,6 +1,20 @@
 --- a/bsd/vm/vm_unix.c
 +++ b/bsd/vm/vm_unix.c
-@@ -2124,6 +2124,18 @@ shared_region_check_np(
+@@ -2082,6 +2082,13 @@ SYSCTL_INT(_vm, OID_AUTO, shared_region_persistence, CTLFLAG_RW | CTLFLAG_LOCKED
+  * ENOMEM	shared region is empty
+  * EFAULT	bad address for "start_address"
+  */
++/* SWEET (0249): the map result outlives the window the QR channel can carry,
++ * so keep it and print it again whenever check_np fails. */
++static uint32_t sweet_srmap_files;
++static uint32_t sweet_srmap_noslide;
++static int sweet_srmap_kr = -1;
++static int sweet_srmap_error = -1;
++
+ int
+ shared_region_check_np(
+ 	__unused struct proc                    *p,
+@@ -2124,6 +2131,18 @@ shared_region_check_np(
  			/* retrieve address of its first mapping... */
  			kr = vm_shared_region_start_address(shared_region, &start_address, task);
  			if (kr != KERN_SUCCESS) {
@@ -19,20 +33,6 @@
  				SHARED_REGION_TRACE_ERROR(("shared_region: %p [%d(%s)] "
  				    "check_np(0x%llx) "
  				    "vm_shared_region_start_address() failed\n",
-@@ -2700,6 +2712,13 @@ done:
-  * Subsequent processes will just use the populated shared region without
-  * requiring any further setup.
-  */
-+/* SWEET (0249): the map result outlives the window the QR channel can carry,
-+ * so keep it and print it again whenever check_np fails. */
-+static uint32_t sweet_srmap_files;
-+static uint32_t sweet_srmap_noslide;
-+static int sweet_srmap_kr = -1;
-+static int sweet_srmap_error = -1;
-+
- static int
- _shared_region_map_and_slide(
- 	struct proc                         *p,
 @@ -2765,6 +2784,7 @@ _shared_region_map_and_slide(
  		mappings[swi].sms_max_prot &= ~VM_PROT_SLIDE;
  		sw_noslide++;
