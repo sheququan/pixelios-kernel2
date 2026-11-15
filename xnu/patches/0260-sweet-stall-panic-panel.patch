@@ -42,7 +42,7 @@
  ZONE_DEFINE(pgrp_zone, "pgrp",
 --- a/bsd/dev/sweet_qr.c
 +++ b/bsd/dev/sweet_qr.c
-@@ -213,6 +213,18 @@ sweet_qr1_loop(void)
+@@ -213,6 +213,21 @@ sweet_qr1_loop(void)
  			extern unsigned sweet_sc_count[1024];
  			static int sc_dumped;
  
@@ -51,10 +51,13 @@
 +				extern int sweet_pid1_stat(void);
 +
 +				sweet_dump_pid1();
-+				/* SWEET (0259): the ring stalls because init stopped, and the
-+				 * machine resets within a second or two, so the panel barely
-+				 * shows the tail.  Panic on purpose: the panic text stays on
-+				 * screen and carries the state we need. */
++				/* SWEET (0259/0260): the ring stalls because init stopped, and
++				 * the machine resets within a second or two, so the panel barely
++				 * shows the tail.  Panic on purpose - but hand the panel back to
++				 * the console first, otherwise our last QR frame hides the panic
++				 * text (0259 did exactly that). */
++				sweet_console_muted = 0;
++				sweet_qr_hold = 0;
 +				panic("SWEET STALL: init p_stat %d (2 SRUN, 3 SSLEEP)",
 +				    sweet_pid1_stat());
 +			}
