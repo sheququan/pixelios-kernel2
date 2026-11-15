@@ -1,0 +1,56 @@
+--- a/bsd/dev/sweet_qr.c
++++ b/bsd/dev/sweet_qr.c
+@@ -146,6 +146,7 @@ extern struct vc_info vinfo;		/* osfmk/console/video_console.c */
+ extern int sweet_console_muted;		/* osfmk/console/serial_console.c: stop drawing console text */
+ extern uint32_t sweet_log_snapshot(char *out, uint32_t max);	/* bsd/dev/sweet_ufs.c (QL1) */
+ extern uint32_t sweet_log_copy(uint64_t *pos, char *out, uint32_t max);	/* bsd/dev/sweet_ufs.c: console bytes [*pos, total) */
++extern uint64_t sweet_log_position(void);	/* bsd/dev/sweet_ufs.c: bytes ever written */
+ 
+ /* While set, AppleCLCD (iokit/Kernel/arm/SweetFramebuffer.cpp) neither presents iOS frames nor fades the panel: the code stays on screen. */
+ int sweet_qr_hold;
+@@ -178,10 +179,34 @@ sweet_qr1_loop(void)
+ 	if (ms < 100) {
+ 		ms = 100;
+ 	}
+-	printf("SWEET QR: taking over the screen (QL1, chunk %u bytes, %u ms/frame, last %u bytes)\n", chunk, ms, tail);
++	printf("SWEET QR: taking over the screen (QL1 idle-flush, chunk %u bytes, %u ms/frame, last %u bytes)\n", chunk, ms, tail);
++	/* SWEET (0246): drawing a 1080x2400 frame costs a whole CPU slice, and on
++	 * this single-CPU boot that starved the exec fill (the log stopped at
++	 * launchd 0x74000 whenever QL1 took over at +4 s).  Stay cheap until the
++	 * ring stops growing, then show the tail: mute the console at once (it is
++	 * the expensive part of printf), poll the ring position every 500 ms and
++	 * only render once nothing has been written for a second. */
+ 	sweet_console_muted = 1;
++	uint64_t quiet_ticks = 0;
++	uint64_t quiet_last = ~(uint64_t)0;
++	uint64_t quiet_since = 0;
++
++	nanoseconds_to_absolutetime(1000000000ULL, &quiet_ticks);   /* 1 s */
+ 	for (;;) {
+ 		sweet_restart_poll();
++		uint64_t total = sweet_log_position();
++		uint64_t now = mach_absolute_time();
++
++		if (total != quiet_last) {
++			quiet_last = total;
++			quiet_since = now;
++			sweet_qr_nap(500);
++			continue;
++		}
++		if (quiet_since == 0 || now - quiet_since < quiet_ticks) {
++			sweet_qr_nap(500);
++			continue;
++		}
+ 		uint32_t len = sweet_log_snapshot(sweet_qr_snap, tail);
+ 		uint32_t n = qrlog_nframes(len, chunk);
+ 		for (uint32_t i = 0; i < n; i++) {
+@@ -195,6 +220,9 @@ sweet_qr1_loop(void)
+ 			(void)qrlog_draw((volatile uint32_t *)v->v_baseaddr, v->v_width, v->v_height,
+ 			    v->v_rowbytes, sweet_qr_frame);
+ 			sweet_qr_nap(ms);
++			if (sweet_log_position() != total) {
++				break;   /* the log woke up again: stop drawing */
++			}
+ 		}
+ 	}
+ }
