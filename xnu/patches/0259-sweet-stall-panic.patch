@@ -1,0 +1,63 @@
+--- a/bsd/kern/kern_proc.c
++++ b/bsd/kern/kern_proc.c
+@@ -201,8 +201,39 @@ __XNU_PRIVATE_EXTERN char drivercorefilename[MAXPATHLEN + 1] = {"/private/var/de
+ 
+ #if PROC_REF_DEBUG
+ #include <kern/backtrace.h>
++
+ #endif
+ 
++/* SWEET (0257): after ignition completes, init stops making syscalls and stops
++ * writing to its log fd. Either it sleeps on something that will never happen or
++ * it spins in userland; the process/thread states tell the two apart. */
++int
++sweet_pid1_stat(void)
++{
++	proc_t p = proc_find(1);
++	int st = -1;
++
++	if (p != PROC_NULL) {
++		st = (int)p->p_stat;
++		proc_rele(p);
++	}
++	return st;
++}
++
++void
++sweet_dump_pid1(void)
++{
++	proc_t p = proc_find(1);
++
++	if (p == PROC_NULL) {
++		printf("SWEET PID1: no proc\n");
++		return;
++	}
++	/* p_stat: 1 SIDL, 2 SRUN, 3 SSLEEP, 4 SSTOP, 5 SZOMB */
++	printf("SWEET PID1: stat %d nice %d\n", (int)p->p_stat, (int)p->p_nice);
++	proc_rele(p);
++}
++
+ static LCK_MTX_DECLARE_ATTR(proc_klist_mlock, &proc_mlock_grp, &proc_lck_attr);
+ 
+ ZONE_DEFINE(pgrp_zone, "pgrp",
+--- a/bsd/dev/sweet_qr.c
++++ b/bsd/dev/sweet_qr.c
+@@ -213,6 +213,18 @@ sweet_qr1_loop(void)
+ 			extern unsigned sweet_sc_count[1024];
+ 			static int sc_dumped;
+ 
++			{
++				extern void sweet_dump_pid1(void);
++				extern int sweet_pid1_stat(void);
++
++				sweet_dump_pid1();
++				/* SWEET (0259): the ring stalls because init stopped, and the
++				 * machine resets within a second or two, so the panel barely
++				 * shows the tail.  Panic on purpose: the panic text stays on
++				 * screen and carries the state we need. */
++				panic("SWEET STALL: init p_stat %d (2 SRUN, 3 SSLEEP)",
++				    sweet_pid1_stat());
++			}
+ 			if (sc_dumped == 0) {
+ 				unsigned best[8] = { 0 };
+ 				int besti[8] = { 0 };
