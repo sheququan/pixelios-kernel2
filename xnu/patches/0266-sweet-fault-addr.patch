@@ -1,0 +1,27 @@
+--- a/bsd/uxkern/ux_exception.c
++++ b/bsd/uxkern/ux_exception.c
+@@ -59,6 +59,24 @@ ux_exception(int                        exception,
+ {
+ 	int machine_signal = 0;
+ 
++	/* SWEET (0266): init dies with SIGBUS and the panic only says
++	 * "namespace 2 subcode 0xa".  The fault address is right here in
++	 * `code` - log the first few bad accesses so the mapping can be
++	 * identified from the 44 SRMAP lines. */
++	if (exception == EXC_BAD_ACCESS) {
++		static int sweet_faults;
++		proc_t cp = current_proc();
++
++		if (sweet_faults < 8) {
++			sweet_faults++;
++			printf("SWEET FAULT: pid %d fault %#llx sub %#llx sig %d\n",
++			    cp ? proc_pid(cp) : -1,
++			    (unsigned long long)code,
++			    (unsigned long long)subcode,
++			    (code == KERN_INVALID_ADDRESS) ? 11 : 10);
++		}
++	}
++
+ 	/* Try machine-dependent translation first. */
+ 	if ((machine_signal = machine_exception(exception, code, subcode)) != 0) {
+ 		return machine_signal;
