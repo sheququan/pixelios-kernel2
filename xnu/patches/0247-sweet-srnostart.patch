@@ -1,0 +1,22 @@
+--- a/bsd/vm/vm_unix.c
++++ b/bsd/vm/vm_unix.c
+@@ -2124,6 +2124,19 @@ shared_region_check_np(
+ 			/* retrieve address of its first mapping... */
+ 			kr = vm_shared_region_start_address(shared_region, &start_address, task);
+ 			if (kr != KERN_SUCCESS) {
++				/* SWEET (0247): say why the region is unusable instead of
++				 * only that it is.  After a failed map_and_slide the region
++				 * can be left with no first mapping, and every later
++				 * check_np fails on it for the rest of the boot. */
++				printf("SWEET SRNOSTART: kr %d base %#llx size %#llx ref %u "
++				    "first %#llx map_in_progress %d stale %d\n",
++				    kr,
++				    (unsigned long long)shared_region->sr_base_address,
++				    (unsigned long long)shared_region->sr_size,
++				    shared_region->sr_ref_count,
++				    (unsigned long long)shared_region->sr_first_mapping,
++				    (int)shared_region->sr_mapping_in_progress,
++				    (int)shared_region->sr_stale);
+ 				SHARED_REGION_TRACE_ERROR(("shared_region: %p [%d(%s)] "
+ 				    "check_np(0x%llx) "
+ 				    "vm_shared_region_start_address() failed\n",
