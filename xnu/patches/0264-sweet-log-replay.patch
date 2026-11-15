@@ -1,0 +1,111 @@
+--- a/bsd/dev/sweet_qr.c
++++ b/bsd/dev/sweet_qr.c
+@@ -213,6 +213,34 @@ sweet_qr1_loop(void)
+ 			extern unsigned sweet_sc_count[1024];
+ 			static int sc_dumped;
+ 
++			{
++				extern void sweet_dump_pid1(void);
++				extern int sweet_pid1_stat(void);
++
++				sweet_dump_pid1();
++				/* SWEET (0259/0260): the ring stalls because init stopped, and
++				 * the machine resets within a second or two, so the panel barely
++				 * shows the tail.  Panic on purpose - but hand the panel back to
++				 * the console first, otherwise our last QR frame hides the panic
++				 * text (0259 did exactly that). */
++				{
++					extern void sweet_log_replay(int lines);
++
++					/* SWEET (0264): hand the panel back and replay the
++					 * ring tail through the console so the last lines are
++					 * actually painted before the watchdog fires.  No
++					 * panic: panic text was hidden behind the QR frame. */
++					sweet_console_muted = 0;
++					sweet_qr_hold = 0;
++					printf("SWEET STALL: p_stat %d, replaying tail\n",
++					    sweet_pid1_stat());
++					sweet_log_replay(45);
++					printf("SWEET STALL: end of tail\n");
++					for (;;) {
++						sweet_qr_nap(1000);
++					}
++				}
++			}
+ 			if (sc_dumped == 0) {
+ 				unsigned best[8] = { 0 };
+ 				int besti[8] = { 0 };
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -1235,7 +1235,10 @@ sweet_ufs_init(void)
+  */
+ #define SWEET_LOG_SIZE          (4u << 20)
+ #define SWEET_LOG_BLOCKS        (1 + SWEET_LOG_SIZE / UFS_BLOCK)
+-#define SWEET_LOG_SECS          10u
++/* SWEET (0261): init goes quiet and the watchdogs reset the machine 1-2 s
++ * later, so a 10 s flush cadence loses the interesting part.  Flush every
++ * second: the write is ~140 blocks at most, paid once per second. */
++#define SWEET_LOG_SECS          1u
+ 
+ static char sweet_log_ring[SWEET_LOG_SIZE];
+ static uint64_t _Atomic sweet_log_total;
+@@ -1273,6 +1276,59 @@ sweet_log_ts_on(void)
+ 	return s == 2;
+ }
+ 
++/* SWEET (0264): print the newest ring lines through the normal console path.
++ * Used when the boot stalls: the panel gets the tail even though no QR frame
++ * can be delivered in time. */
++void
++sweet_log_replay(int lines)
++{
++	char buf[8192];
++	uint64_t total = os_atomic_load(&sweet_log_total, relaxed);
++	uint64_t n;
++	int seen = 0, start = 0;
++
++	if (lines <= 0 || total == 0) {
++		return;
++	}
++	n = (uint64_t)lines * 160;             /* generous: 160 bytes per line */
++	if (n > total) {
++		n = total;
++	}
++	if (n > sizeof(buf) - 1) {
++		n = sizeof(buf) - 1;
++	}
++	for (uint64_t i = 0; i < n; i++) {
++		buf[i] = sweet_log_ring[(total - n + i) % SWEET_LOG_SIZE];
++	}
++	buf[n] = 0;
++
++	/* walk backwards to the line boundary that keeps `lines` lines */
++	for (uint64_t i = n; i > 0; i--) {
++		if (buf[i - 1] == '\n' && ++seen > lines) {
++			start = (int)i;
++			break;
++		}
++	}
++	for (int i = start; buf[i]; ) {
++		char line[160];
++		int k = 0;
++
++		while (buf[i] && buf[i] != '\n' && k < (int)sizeof(line) - 1) {
++			line[k++] = buf[i++];
++		}
++		while (buf[i] && buf[i] != '\n') {
++			i++;
++		}
++		if (buf[i] == '\n') {
++			i++;
++		}
++		line[k] = 0;
++		if (k) {
++			printf("%s\n", line);
++		}
++	}
++}
++
+ void
+ sweet_log_append(const char *c, int size)
+ {
