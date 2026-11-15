@@ -1,0 +1,55 @@
+--- a/bsd/kern/kern_proc.c
++++ b/bsd/kern/kern_proc.c
+@@ -201,6 +201,38 @@ __XNU_PRIVATE_EXTERN char drivercorefilename[MAXPATHLEN + 1] = {"/private/var/de
+ 
+ #if PROC_REF_DEBUG
+ #include <kern/backtrace.h>
++
++/* SWEET (0257): after ignition completes, init stops making syscalls and stops
++ * writing to its log fd. Either it sleeps on something that will never happen or
++ * it spins in userland; the process/thread states tell the two apart. */
++void
++sweet_dump_pid1(void)
++{
++	proc_t p = proc_find(1);
++	uthread_t ut;
++	int n = 0;
++
++	if (p == PROC_NULL) {
++		printf("SWEET PID1: no proc\n");
++		return;
++	}
++	printf("SWEET PID1: stat %d flag %#x\n", (int)p->p_stat, (unsigned)p->p_flag);
++	proc_lock(p);
++	TAILQ_FOREACH(ut, &p->p_uthlist, uu_list) {
++		thread_t th = ut->uu_thread;
++
++		if (th == THREAD_NULL) {
++			continue;
++		}
++		printf("SWEET T%d: state %#x pri %d\n", n,
++		    (unsigned)th->state, (int)th->priority);
++		if (++n >= 6) {
++			break;
++		}
++	}
++	proc_unlock(p);
++	proc_rele(p);
++}
+ #endif
+ 
+ static LCK_MTX_DECLARE_ATTR(proc_klist_mlock, &proc_mlock_grp, &proc_lck_attr);
+--- a/bsd/dev/sweet_qr.c
++++ b/bsd/dev/sweet_qr.c
+@@ -213,6 +213,11 @@ sweet_qr1_loop(void)
+ 			extern unsigned sweet_sc_count[1024];
+ 			static int sc_dumped;
+ 
++			{
++				extern void sweet_dump_pid1(void);
++
++				sweet_dump_pid1();
++			}
+ 			if (sc_dumped == 0) {
+ 				unsigned best[8] = { 0 };
+ 				int besti[8] = { 0 };
