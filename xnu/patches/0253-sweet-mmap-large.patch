@@ -1,0 +1,24 @@
+--- a/bsd/kern/kern_mman.c
++++ b/bsd/kern/kern_mman.c
+@@ -181,6 +181,9 @@ vnode_t fbdp_vp = NULL;
+ int
+ mmap(proc_t p, struct mmap_args *uap, user_addr_t *retval)
+ {
++	/* SWEET (0253): dyld never calls shared_region_map_and_slide_2_np (0252:
++	 * sys536 0), so either it loads the cache privately (a few huge mmaps) or
++	 * not at all.  Say so for mappings over 64 MB. */
+ 	/*
+ 	 *	Map in special device (must be SHARED) or file
+ 	 */
+@@ -903,6 +906,11 @@ map_file_retry:
+ 	switch (result) {
+ 	case KERN_SUCCESS:
+ 		*retval = user_addr + pageoff;
++		if (uap->len >= (64ULL << 20)) {
++			printf("SWEET MMAP: addr %#llx len %#llx prot %d flags %#x fd %d\n",
++			    (unsigned long long)*retval, (unsigned long long)uap->len,
++			    (int)uap->prot, (unsigned)uap->flags, (int)uap->fd);
++		}
+ 		error = 0;
+ 		break;
+ 	case KERN_INVALID_ADDRESS:
