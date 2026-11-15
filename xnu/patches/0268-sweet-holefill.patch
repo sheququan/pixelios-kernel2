@@ -1,0 +1,71 @@
+--- a/osfmk/vm/vm_shared_region.c
++++ b/osfmk/vm/vm_shared_region.c
+@@ -2073,6 +2073,68 @@ vm_shared_region_map_file(
+ 
+ 	vm_shared_region_map_file_final(shared_region, sr_map, sfm_min_address, sfm_max_address);
+ 
++	/*
++	 * SWEET (0268): the split cache leaves very large VA holes between the
++	 * per-subcache segments (we measured 253 MB, 19 MB and 169 MB).  Any
++	 * stray read into one of them is an unmapped page, which surfaces as
++	 * EXC_BAD_ACCESS -> SIGBUS in launchd (namespace 2 subcode 0xa).
++	 * Fill the holes with anonymous zero pages: reads return zero, writes
++	 * stay copy-on-write, and no physical memory is committed up front.
++	 */
++	{
++		struct sweet_rng {
++			vm_map_offset_t a, e;
++		} rngs[160];
++		int n = 0, filled = 0;
++
++		for (srfmp = &sr_file_mappings[0];
++		    srfmp < &sr_file_mappings[sr_file_mappings_count];
++		    srfmp++) {
++			for (i = 0; i < srfmp->mappings_count && n < 160; i++) {
++				if (srfmp->mappings[i].sms_size == 0) {
++					continue;
++				}
++				rngs[n].a = (vm_map_offset_t)srfmp->mappings[i].sms_address;
++				rngs[n].e = rngs[n].a + (vm_map_offset_t)srfmp->mappings[i].sms_size;
++				n++;
++			}
++		}
++		/* insertion sort by start */
++		for (i = 1; i < (unsigned int)n; i++) {
++			struct sweet_rng t = rngs[i];
++			int j = (int)i - 1;
++
++			while (j >= 0 && rngs[j].a > t.a) {
++				rngs[j + 1] = rngs[j];
++				j--;
++			}
++			rngs[j + 1] = t;
++		}
++		for (i = 1; i < (unsigned int)n; i++) {
++			vm_map_offset_t addr, size;
++			vm_map_kernel_flags_t vf;
++			kern_return_t fkr;
++
++			if (rngs[i].a <= rngs[i - 1].e) {
++				continue;
++			}
++			addr = rngs[i - 1].e;
++			size = rngs[i].a - rngs[i - 1].e;
++			vf = VM_MAP_KERNEL_FLAGS_FIXED(.vmf_overwrite = false);
++			fkr = vm_map_enter(sr_map, &addr, size, 0, vf, VM_OBJECT_NULL, 0,
++			    FALSE, VM_PROT_READ | VM_PROT_WRITE,
++			    VM_PROT_READ | VM_PROT_WRITE, VM_INHERIT_DEFAULT);
++			printf("SWEET HOLEFILL: %#llx+%#llx kr %d\n",
++			    (unsigned long long)rngs[i - 1].e,
++			    (unsigned long long)size, (int)fkr);
++			if (fkr == KERN_SUCCESS) {
++				filled++;
++			}
++		}
++		printf("SWEET HOLEFILL: %d hole(s), %d filled, %d ranges\n",
++		    n > 1 ? n - 1 : 0, filled, n);
++	}
++
+ done:
+ 	/*
+ 	 * We're done working on that shared region.
