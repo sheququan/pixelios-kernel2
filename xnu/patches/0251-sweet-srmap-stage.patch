@@ -1,6 +1,6 @@
 --- a/bsd/vm/vm_unix.c
 +++ b/bsd/vm/vm_unix.c
-@@ -2082,6 +2082,13 @@ SYSCTL_INT(_vm, OID_AUTO, shared_region_persistence, CTLFLAG_RW | CTLFLAG_LOCKED
+@@ -2082,6 +2082,15 @@ SYSCTL_INT(_vm, OID_AUTO, shared_region_persistence, CTLFLAG_RW | CTLFLAG_LOCKED
   * ENOMEM	shared region is empty
   * EFAULT	bad address for "start_address"
   */
@@ -10,11 +10,13 @@
 +static uint32_t sweet_srmap_noslide;
 +static int sweet_srmap_kr = -1;
 +static int sweet_srmap_error = -1;
++static uint32_t sweet_srmap_mappings;
++static int sweet_srmap_stage;
 +
  int
  shared_region_check_np(
  	__unused struct proc                    *p,
-@@ -2124,6 +2131,18 @@ shared_region_check_np(
+@@ -2124,6 +2133,20 @@ shared_region_check_np(
  			/* retrieve address of its first mapping... */
  			kr = vm_shared_region_start_address(shared_region, &start_address, task);
  			if (kr != KERN_SUCCESS) {
@@ -25,15 +27,17 @@
 +				{
 +					extern void sweet_sr_dump(void *sr);
 +
-+					printf("SWEET SRNOSTART: kr %d lastmap files %u kr %d err %d noslide %u\n",
-+					    kr, sweet_srmap_files, sweet_srmap_kr,
++					printf("SWEET SRNOSTART: kr %d stage %d files %u maps %u "
++					    "mapkr %d err %d noslide %u\n",
++					    kr, sweet_srmap_stage, sweet_srmap_files,
++					    sweet_srmap_mappings, sweet_srmap_kr,
 +					    sweet_srmap_error, sweet_srmap_noslide);
 +					sweet_sr_dump(shared_region);
 +				}
  				SHARED_REGION_TRACE_ERROR(("shared_region: %p [%d(%s)] "
  				    "check_np(0x%llx) "
  				    "vm_shared_region_start_address() failed\n",
-@@ -2765,6 +2784,7 @@ _shared_region_map_and_slide(
+@@ -2765,6 +2788,7 @@ _shared_region_map_and_slide(
  		mappings[swi].sms_max_prot &= ~VM_PROT_SLIDE;
  		sw_noslide++;
  	}
@@ -41,7 +45,7 @@
  	if (sw_noslide != 0) {
  		printf("SWEET SRNOSLIDE: dropped %u slide request(s), region %#llx+%#llx\n",
  		    sw_noslide, (unsigned long long)0x180000000ULL,
-@@ -2820,6 +2840,9 @@ _shared_region_map_and_slide(
+@@ -2820,6 +2844,9 @@ _shared_region_map_and_slide(
  	 * told apart from the screen.
  	 */
  	printf("SWEET SRMAP: files %u map_kr %#x error %d\n", files_count, kr, error);
@@ -51,6 +55,34 @@
  
  	/*
  	 * Mark that this process is now using split libraries.
+@@ -2945,6 +2972,11 @@ shared_region_map_and_slide_2_np(
+ 
+ 	files_count = uap->files_count;
+ 	mappings_count = uap->mappings_count;
++	/* SWEET (0251): remember that dyld even got here, and how far it got:
++	 * 1 = entered, 2 = arguments accepted, 3 = copyin done. */
++	sweet_srmap_stage = 1;
++	sweet_srmap_files = files_count;
++	sweet_srmap_mappings = mappings_count;
+ 
+ 	if (files_count == 0) {
+ 		SHARED_REGION_TRACE_INFO(
+@@ -2996,6 +3028,7 @@ shared_region_map_and_slide_2_np(
+ 		goto done;
+ 	}
+ 
++	sweet_srmap_stage = 2;
+ 	kr = shared_region_copyin(p, uap->files, files_count, sizeof(shared_files[0]), shared_files);
+ 	if (kr != KERN_SUCCESS) {
+ 		goto done;
+@@ -3048,6 +3081,7 @@ shared_region_map_and_slide_2_np(
+ 		}
+ 	}
+ 
++	sweet_srmap_stage = 3;
+ 	kr = _shared_region_map_and_slide(p, files_count, shared_files, mappings_count, mappings);
+ done:
+ 	kfree_data(shared_files, files_count * sizeof(shared_files[0]));
 --- a/osfmk/vm/vm_shared_region.c
 +++ b/osfmk/vm/vm_shared_region.c
 @@ -202,6 +202,28 @@ static vm_shared_region_t vm_shared_region_create(
