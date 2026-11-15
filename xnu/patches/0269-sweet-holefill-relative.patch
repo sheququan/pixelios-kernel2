@@ -1,0 +1,19 @@
+--- a/osfmk/vm/vm_shared_region.c
++++ b/osfmk/vm/vm_shared_region.c
+@@ -2103,6 +2103,20 @@
+ 			if (rngs[i].a <= rngs[i - 1].e) {
+ 				continue;
+ 			}
+-			addr = rngs[i - 1].e;
++			/*
++			 * SWEET (0269): vm_map_enter() takes addresses that are
++			 * *relative to the shared region base* on this submap --
++			 * the main mapping loop above builds its addresses with
++			 * "target_address = sms_address - sr_base_address".
++			 * 0268 handed over absolute addresses, which are larger
++			 * than the submap's max_offset (sr_size = 0x100000000),
++			 * so every single enter came back KERN_INVALID_ADDRESS
++			 * (the "kr 1" seen on all three holes).
++			 */
++			addr = rngs[i - 1].e - shared_region->sr_base_address;
+ 			size = rngs[i].a - rngs[i - 1].e;
