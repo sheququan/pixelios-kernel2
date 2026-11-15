@@ -1,6 +1,6 @@
 --- a/bsd/vm/vm_unix.c
 +++ b/bsd/vm/vm_unix.c
-@@ -2124,6 +2124,16 @@ shared_region_check_np(
+@@ -2124,6 +2124,18 @@ shared_region_check_np(
  			/* retrieve address of its first mapping... */
  			kr = vm_shared_region_start_address(shared_region, &start_address, task);
  			if (kr != KERN_SUCCESS) {
@@ -11,12 +11,46 @@
 +				{
 +					extern void sweet_sr_dump(void *sr);
 +
-+					printf("SWEET SRNOSTART: kr %d\n", kr);
++					printf("SWEET SRNOSTART: kr %d lastmap files %u kr %d err %d noslide %u\n",
++					    kr, sweet_srmap_files, sweet_srmap_kr,
++					    sweet_srmap_error, sweet_srmap_noslide);
 +					sweet_sr_dump(shared_region);
 +				}
  				SHARED_REGION_TRACE_ERROR(("shared_region: %p [%d(%s)] "
  				    "check_np(0x%llx) "
  				    "vm_shared_region_start_address() failed\n",
+@@ -2700,6 +2712,13 @@ done:
+  * Subsequent processes will just use the populated shared region without
+  * requiring any further setup.
+  */
++/* SWEET (0249): the map result outlives the window the QR channel can carry,
++ * so keep it and print it again whenever check_np fails. */
++static uint32_t sweet_srmap_files;
++static uint32_t sweet_srmap_noslide;
++static int sweet_srmap_kr = -1;
++static int sweet_srmap_error = -1;
++
+ static int
+ _shared_region_map_and_slide(
+ 	struct proc                         *p,
+@@ -2765,6 +2784,7 @@ _shared_region_map_and_slide(
+ 		mappings[swi].sms_max_prot &= ~VM_PROT_SLIDE;
+ 		sw_noslide++;
+ 	}
++	sweet_srmap_noslide = sw_noslide;
+ 	if (sw_noslide != 0) {
+ 		printf("SWEET SRNOSLIDE: dropped %u slide request(s), region %#llx+%#llx\n",
+ 		    sw_noslide, (unsigned long long)0x180000000ULL,
+@@ -2820,6 +2840,9 @@ _shared_region_map_and_slide(
+ 	 * told apart from the screen.
+ 	 */
+ 	printf("SWEET SRMAP: files %u map_kr %#x error %d\n", files_count, kr, error);
++	sweet_srmap_files = files_count;
++	sweet_srmap_kr = (int)kr;
++	sweet_srmap_error = error;
+ 
+ 	/*
+ 	 * Mark that this process is now using split libraries.
 --- a/osfmk/vm/vm_shared_region.c
 +++ b/osfmk/vm/vm_shared_region.c
 @@ -202,6 +202,28 @@ static vm_shared_region_t vm_shared_region_create(
