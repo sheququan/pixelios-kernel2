@@ -1,0 +1,64 @@
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -54,6 +54,11 @@ static void     arm_trace_unix_syscall(int, struct arm_saved_state *);
+ int sweet_seen_438;
+ int sweet_seen_536;
+ int sweet_seen_294;
++
++/* SWEET (0255): a histogram of unix syscalls, so a silently stuck init can be
++ * located without any userland cooperation: whichever entry keeps growing is
++ * the call it is spinning on. */
++unsigned sweet_sc_count[1024];
+ static void     arm_clear_syscall_error(struct arm_saved_state *);
+ #define save_r0         r[0]
+ #define save_r1         r[1]
+@@ -119,6 +124,9 @@ unix_syscall(
+ 		} else if (code == 294) {
+ 			sweet_seen_294++;
+ 		}
++		if (code < 1024) {
++			sweet_sc_count[code]++;
++		}
+ 	}
+ 
+ #define unix_syscall_kprintf(x...)      /* kprintf("unix_syscall: " x) */
+--- a/bsd/dev/sweet_qr.c
++++ b/bsd/dev/sweet_qr.c
+@@ -207,6 +207,37 @@ sweet_qr1_loop(void)
+ 			sweet_qr_nap(500);
+ 			continue;
+ 		}
++		/* SWEET (0255): the log went quiet - dump the syscall histogram once
++		 * so the stuck init can be located from the panel. */
++		{
++			extern unsigned sweet_sc_count[1024];
++			static int sc_dumped;
++
++			if (sc_dumped == 0) {
++				unsigned best[8] = { 0 };
++				int besti[8] = { 0 };
++				sc_dumped = 1;
++				for (int i = 0; i < 1024; i++) {
++					unsigned v = sweet_sc_count[i];
++					for (int k = 0; k < 8; k++) {
++						if (v > best[k]) {
++							for (int m = 7; m > k; m--) {
++								best[m] = best[m - 1];
++								besti[m] = besti[m - 1];
++							}
++							best[k] = v;
++							besti[k] = i;
++							break;
++						}
++					}
++				}
++				for (int k = 0; k < 8; k++) {
++					if (best[k]) {
++						printf("SWEET SC: %d x%u\n", besti[k], best[k]);
++					}
++				}
++			}
++		}
+ 		uint32_t len = sweet_log_snapshot(sweet_qr_snap, tail);
+ 		uint32_t n = qrlog_nframes(len, chunk);
+ 		for (uint32_t i = 0; i < n; i++) {
