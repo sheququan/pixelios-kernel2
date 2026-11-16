@@ -1,0 +1,39 @@
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -1191,6 +1191,26 @@
+ 
+ 	exc = EXC_BAD_ACCESS;
+ #if __has_feature(ptrauth_calls)
+ 	if (user_fault_addr_matches_pac_error_code(get_saved_state_pc(ss), false)) {
+ 		exc |= EXC_PTRAUTH_BIT;
+ 	}
+ #endif /* __has_feature(ptrauth_calls) */
+ 
++	/*
++	 * SWEET (0270): launchd dies here -- not from a page fault, but from a
++	 * branch to a misaligned address (ux_exception sees code 0x101 =
++	 * EXC_ARM_DA_ALIGN).  That means a function pointer was read from the
++	 * wrong memory.  Dump the pc itself, the stack pointer, cpsr and
++	 * SCTLR_EL1 (if SCTLR.A is set, every unaligned user access traps and
++	 * that alone would explain the kill), plus the bytes at pc.
++	 */
++	{
++		uint32_t sweet_w[2] = { 0, 0 };
++		uint64_t sweet_pc = (uint64_t)get_saved_state_pc(ss);
++		uint64_t sweet_sctlr = 0;
++
++		__asm__ volatile("mrs %0, SCTLR_EL1" : "=r"(sweet_sctlr));
++		COPYIN(sweet_pc & ~3ULL, (char *)sweet_w, sizeof(sweet_w));
++		panic("SWEET PCALIGN: pc %#llx sp %#llx cpsr %#llx sctlr %#llx w %08x %08x",
++		    (unsigned long long)sweet_pc,
++		    (unsigned long long)get_saved_state_sp(ss),
++		    (unsigned long long)get_saved_state_cpsr(ss),
++		    (unsigned long long)sweet_sctlr,
++		    sweet_w[0], sweet_w[1]);
++	}
+ 	codes[0] = EXC_ARM_DA_ALIGN;
+ 	codes[1] = get_saved_state_pc(ss);
+ 
+ 	exception_triage(exc, codes, numcodes);
+ 	__builtin_unreachable();
+ }
