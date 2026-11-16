@@ -1,10 +1,6 @@
 --- a/osfmk/vm/vm_shared_region.c
 +++ b/osfmk/vm/vm_shared_region.c
-@@ -2103,6 +2103,20 @@
- 			if (rngs[i].a <= rngs[i - 1].e) {
- 				continue;
- 			}
--			addr = rngs[i - 1].e;
+@@ -2106,5 +2106,15 @@ 
 +			/*
 +			 * SWEET (0269): vm_map_enter() takes addresses that are
 +			 * *relative to the shared region base* on this submap --
@@ -16,4 +12,8 @@
 +			 * (the "kr 1" seen on all three holes).
 +			 */
 +			addr = rngs[i - 1].e - shared_region->sr_base_address;
+ 			if (rngs[i].a <= rngs[i - 1].e) {
+ 				continue;
+ 			}
+-			addr = rngs[i - 1].e;
  			size = rngs[i].a - rngs[i - 1].e;
