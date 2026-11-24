@@ -1,0 +1,226 @@
+--- a/bsd/vm/vm_unix.c
++++ b/bsd/vm/vm_unix.c
+@@ -2729,6 +2729,71 @@ done:
+  * Subsequent processes will just use the populated shared region without
+  * requiring any further setup.
+  */
++/*
++ * SWEET (0271): the cache maps, but is the mapped page the file's data?
++ *
++ * R143 ended with launchd branching to 0x12ae7991130042, and that value is not
++ * on the image anywhere: it is the two adjacent instructions at file offset
++ * 0x477c138 of dyld_shared_cache_arm64.19 (add x2,x2,#0x4c0 then bl) sitting
++ * where a pointer was expected, so a page handed out bytes from a different
++ * place in the file.  Compare what the pager returns with a direct UFS read of
++ * the same file offset; the direct read is the one path that has delivered
++ * byte-exact data since 0209 (F131/F144).
++ */
++extern errno_t VNOP_BLOCKMAP(vnode_t, off_t, size_t, daddr64_t *, size_t *,
++    void *, int, vfs_context_t);
++extern int sweet_ufs_read_at(daddr64_t, uint32_t, void *);
++
++static char
++sweet_chk_page(struct vnode *vp, user_addr_t va, off_t foff, const char *tag)
++{
++	static char sweet_chk_disk[4096];
++	uint32_t sweet_chk_mem[8];
++	daddr64_t sbpn = 0;
++	size_t srun = 0;
++	int se, k;
++
++	se = VNOP_BLOCKMAP(vp, foff, 32, &sbpn, &srun, NULL, VNODE_READ,
++	    vfs_context_current());
++	if (se != 0 || sbpn < 0) {
++		return '-';
++	}
++	if (sweet_ufs_read_at(sbpn, 4096, sweet_chk_disk) != 0) {
++		return '!';
++	}
++	if (copyin(va, (char *)sweet_chk_mem, sizeof(sweet_chk_mem)) != 0) {
++		return '?';
++	}
++	for (k = 0; k < 8; k++) {
++		uint32_t want;
++
++		bcopy(sweet_chk_disk + 4 * k, &want, sizeof(want));
++		if (want != sweet_chk_mem[k]) {
++			uint32_t d0, d4;
++
++			bcopy(sweet_chk_disk, &d0, sizeof(d0));
++			bcopy(sweet_chk_disk + 16, &d4, sizeof(d4));
++			printf("SWEET PCHKX: %s off %#llx va %#llx mem %08x %08x disk %08x %08x run %llu\n",
++			    tag, (unsigned long long)foff,
++			    (unsigned long long)va,
++			    sweet_chk_mem[0], sweet_chk_mem[4],
++			    d0, d4, (unsigned long long)srun);
++			return 'X';
++		}
++	}
++	return '=';
++}
++
++/*
++ * Verdict of the shared-cache page check, kept in globals so the panic path
++ * (osfmk/arm64/sleh.c) can print it long after the console line that produced
++ * it has scrolled away.
++ */
++char sweet_pchk_line[64];
++char sweet_pchk_line2[64];
++int sweet_pchk_bad;
++int sweet_pchk_n;
++
+ static int
+ _shared_region_map_and_slide(
+ 	struct proc                         *p,
+@@ -2854,6 +2919,73 @@ _shared_region_map_and_slide(
+ 	sweet_srmap_kr = (int)kr;
+ 	sweet_srmap_error = error;
+ 
++	sweet_pchk_bad = 0;
++	sweet_pchk_n = 0;
++	sweet_pchk_line[0] = 0;
++	sweet_pchk_line2[0] = 0;
++	if (error == 0 && sr_file_mappings != NULL) {
++		uint32_t sweet_chk_i, sweet_chk_n2 = 0, sweet_chk_bad2 = 0;
++
++		for (sweet_chk_i = 0; sweet_chk_i < files_count &&
++		    sweet_chk_i < 46; sweet_chk_i++) {
++			struct _sr_file_mappings *sfmp = &sr_file_mappings[sweet_chk_i];
++			struct shared_file_mapping_slide_np *smp;
++			char sweet_c;
++
++			if (sfmp->mappings_count == 0 || sfmp->vp == NULL) {
++				sweet_pchk_line[sweet_pchk_n++] = '.';
++				continue;
++			}
++			smp = &sfmp->mappings[0];
++			if (smp->sms_init_prot & VM_PROT_ZF) {
++				sweet_pchk_line[sweet_pchk_n++] = 'z';
++				continue;
++			}
++			sweet_c = sweet_chk_page(sfmp->vp,
++			    (user_addr_t)smp->sms_address,
++			    (off_t)smp->sms_file_offset, "first");
++			if (sweet_c == 'X') {
++				sweet_pchk_bad++;
++			}
++			sweet_pchk_line[sweet_pchk_n++] = sweet_c;
++		}
++		sweet_pchk_line[sweet_pchk_n] = 0;
++
++		/*
++		 * Second sample: the exact page the R143 target came out of, in
++		 * every file big enough to hold it (only .19 owns that offset,
++		 * the rest are control samples).
++		 */
++		for (sweet_chk_i = 0; sweet_chk_i < files_count &&
++		    sweet_chk_i < 46 && sweet_chk_n2 < 46; sweet_chk_i++) {
++			struct _sr_file_mappings *sfmp = &sr_file_mappings[sweet_chk_i];
++			struct shared_file_mapping_slide_np *smp;
++			char sweet_c;
++
++			if (sfmp->mappings_count == 0 || sfmp->vp == NULL ||
++			    sfmp->file_size <= 0x477c000) {
++				continue;
++			}
++			smp = &sfmp->mappings[0];
++			if ((smp->sms_init_prot & VM_PROT_ZF) ||
++			    smp->sms_size <= 0x477c000) {
++				continue;
++			}
++			sweet_c = sweet_chk_page(sfmp->vp,
++			    (user_addr_t)(smp->sms_address + 0x477c000),
++			    (off_t)0x477c000, "r143");
++			if (sweet_c == 'X') {
++				sweet_chk_bad2++;
++			}
++			sweet_pchk_line2[sweet_chk_n2++] = sweet_c;
++		}
++		sweet_pchk_line2[sweet_chk_n2] = 0;
++		printf("SWEET PCHK %d/%d: %s\n", sweet_pchk_bad, sweet_pchk_n,
++		    sweet_pchk_line);
++		printf("SWEET PCHK2 %u/%u: %s\n", sweet_chk_bad2, sweet_chk_n2,
++		    sweet_pchk_line2);
++	}
++
+ 	/*
+ 	 * Mark that this process is now using split libraries.
+ 	 */
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -1327,23 +1327,66 @@ handle_pc_align(arm_saved_state_t *ss)
+ #endif /* __has_feature(ptrauth_calls) */
+ 
+ 	/*
+-	 * SWEET (0270): launchd dies here -- not from a page fault,
++	 * SWEET (0270/0271): launchd dies here -- not from a page fault,
+ 	 * but from a branch to a misaligned address (ux_exception sees
+-	 * code 0x101 = EXC_ARM_DA_ALIGN), i.e. a function pointer was
+-	 * read from the wrong memory.  Dump the pc, sp, cpsr and
+-	 * SCTLR_EL1 (SCTLR.A set would trap every unaligned user
+-	 * access) plus the bytes at pc.
++	 * code 0x101 = EXC_ARM_DA_ALIGN).  R143's target was two adjacent
++	 * instructions lifted out of a shared-cache text page, so an
++	 * indirect branch received a code slice.  Print the registers that
++	 * can hold a branch target and the stack words pointing back into
++	 * the shared region: the caller's return address locates the call
++	 * site offline.
+ 	 */
+ 	{
++		extern char sweet_pchk_line[];
++		extern char sweet_pchk_line2[];
++		extern int sweet_pchk_bad;
++		extern int sweet_pchk_n;
+ 		uint64_t sweet_pc = (uint64_t)get_saved_state_pc(ss);
++		uint64_t sweet_sp = (uint64_t)get_saved_state_sp(ss);
+ 		uint64_t sweet_sctlr = 0;
++		uint64_t sweet_w = 0;
++		int sweet_i, sweet_hits = 0;
+ 
+ 		__asm__ volatile("mrs %0, SCTLR_EL1" : "=r"(sweet_sctlr));
+-		panic("SWEET PCALIGN: pc %#llx sp %#llx cpsr %#llx sctlr %#llx",
++		printf("SWEET PREG0: x0 %#llx x1 %#llx x2 %#llx x3 %#llx\n",
++		    (unsigned long long)get_saved_state_reg(ss, 0),
++		    (unsigned long long)get_saved_state_reg(ss, 1),
++		    (unsigned long long)get_saved_state_reg(ss, 2),
++		    (unsigned long long)get_saved_state_reg(ss, 3));
++		printf("SWEET PREG1: x4 %#llx x5 %#llx x6 %#llx x7 %#llx\n",
++		    (unsigned long long)get_saved_state_reg(ss, 4),
++		    (unsigned long long)get_saved_state_reg(ss, 5),
++		    (unsigned long long)get_saved_state_reg(ss, 6),
++		    (unsigned long long)get_saved_state_reg(ss, 7));
++		printf("SWEET PREG2: x8 %#llx x9 %#llx x16 %#llx x17 %#llx\n",
++		    (unsigned long long)get_saved_state_reg(ss, 8),
++		    (unsigned long long)get_saved_state_reg(ss, 9),
++		    (unsigned long long)get_saved_state_reg(ss, 16),
++		    (unsigned long long)get_saved_state_reg(ss, 17));
++		printf("SWEET PREG3: fp %#llx lr %#llx sp %#llx cpsr %#llx\n",
++		    (unsigned long long)get_saved_state_fp(ss),
++		    (unsigned long long)get_saved_state_lr(ss),
++		    (unsigned long long)sweet_sp,
++		    (unsigned long long)get_saved_state_cpsr(ss));
++		for (sweet_i = 0; sweet_i < 32 && sweet_hits < 3; sweet_i++) {
++			if (copyin((user_addr_t)(sweet_sp + sweet_i * 8),
++			    (char *)&sweet_w, sizeof(sweet_w)) != 0) {
++				break;
++			}
++			if (sweet_w >= 0x180000000ULL && sweet_w < 0x230000000ULL) {
++				printf("SWEET PSTK: +%#x %#llx\n", sweet_i * 8,
++				    (unsigned long long)sweet_w);
++				sweet_hits++;
++			}
++		}
++		if (sweet_pchk_n != 0) {
++			printf("SWEET PCHK2: %s\n", sweet_pchk_line2);
++		}
++		panic("SWEET PCALIGN: pc %#llx sctlr %#llx pchk %d/%d %s",
+ 		    (unsigned long long)sweet_pc,
+-		    (unsigned long long)get_saved_state_sp(ss),
+-		    (unsigned long long)get_saved_state_cpsr(ss),
+-		    (unsigned long long)sweet_sctlr);
++		    (unsigned long long)sweet_sctlr,
++		    sweet_pchk_bad, sweet_pchk_n,
++		    sweet_pchk_n != 0 ? sweet_pchk_line : "none");
+ 	}
+ 
+ 	codes[0] = EXC_ARM_DA_ALIGN;
