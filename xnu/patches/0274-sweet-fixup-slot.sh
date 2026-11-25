@@ -112,7 +112,7 @@ probe = r'''	/*
 				extern uint64_t pmap_find_pa(pmap_t, addr64_t);
 				extern pmap_t current_pmap(void);
 				extern void ml_phys_write_double_64(addr64_t, unsigned long long);
-				static char sweet_pg[0x4000];
+				static char sweet_pg[0x100000];
 				uint32_t k;
 				uint64_t uva[8], usz[8], ufoff[8];
 				uint32_t hmo = 0, hmc = 0;
@@ -154,7 +154,7 @@ probe = r'''	/*
 					uint64_t sz = usz[k];
 					uint64_t off;
 
-					for (off = 0; off + 0x4000 <= sz; off += 0x4000) {
+					for (off = 0; off + 0x100000 <= sz; off += 0x100000) {
 						user_addr_t pva = (user_addr_t)
 						    (sfmp->mappings[k].sms_address + off);
 						uint32_t o;
@@ -164,7 +164,7 @@ probe = r'''	/*
 							skipped++;
 							continue;
 						}
-						for (o = 0; o + 8 <= 0x4000; o += 8) {
+						for (o = 0; o + 8 <= 0x100000; o += 8) {
 							uint64_t v = *(uint64_t *)(sweet_pg + o);
 							uint64_t t, np, pa;
 
@@ -189,7 +189,7 @@ probe = r'''	/*
 							fixed++;
 						}
 						pages++;
-						if ((pages & 0x1ff) == 0) {
+						if ((pages & 0x1f) == 0) {
 							printf("SWEET FULLFIX: pages %llu fixed %llu skip %llu\n",
 							    (unsigned long long)pages,
 							    (unsigned long long)fixed,
