@@ -117,10 +117,10 @@ probe = r'''	/*
 				extern pmap_t current_pmap(void);
 				extern void ml_phys_write_double_64(addr64_t, unsigned long long);
 				uint32_t k;
-				uint64_t uva[8], usz[8];
+				uint64_t uva[8], usz[8], ufoff[8];
 				uint32_t hmo = 0, hmc = 0;
 
-				for (k = 0; k < 8; k++) { uva[k] = 0; usz[k] = 0; }
+				for (k = 0; k < 8; k++) { uva[k] = 0; usz[k] = 0; ufoff[k] = 0; }
 				bzero(sweet_fix_disk, sizeof(sweet_fix_disk));
 				{
 					daddr64_t hbpn = 0;
@@ -137,13 +137,15 @@ probe = r'''	/*
 						for (k = 0; k < hmc; k++) {
 							uva[k] = *(uint64_t *)(sweet_fix_disk + hmo + k * 32);
 							usz[k] = *(uint64_t *)(sweet_fix_disk + hmo + k * 32 + 8);
+							ufoff[k] = *(uint64_t *)(sweet_fix_disk + hmo + k * 32 + 16);
 						}
 					}
 				}
 				for (k = 0; k < hmc; k++) {
-					printf("SWEET MAP27: k %u unslid %#llx slid %#llx size %#llx slide %#llx\n",
+					printf("SWEET MAP27: k %u unslid %#llx slid %#llx foff %#llx size %#llx slide %#llx\n",
 					    k, (unsigned long long)uva[k],
 					    (unsigned long long)sfmp->mappings[k].sms_address,
+					    (unsigned long long)ufoff[k],
 					    (unsigned long long)usz[k],
 					    (unsigned long long)(sfmp->mappings[k].sms_address - uva[k]));
 				}
@@ -161,10 +163,10 @@ probe = r'''	/*
 						int pfound = 0;
 
 						for (k = 0; k < hmc; k++) {
-							if (uva[k] <= (uint64_t)pfoff &&
-							    (uint64_t)pfoff < uva[k] + usz[k]) {
+							if (ufoff[k] <= (uint64_t)pfoff &&
+							    (uint64_t)pfoff < ufoff[k] + usz[k]) {
 								pva = (user_addr_t)(sfmp->mappings[k].sms_address +
-								    ((uint64_t)pfoff - uva[k]));
+								    ((uint64_t)pfoff - ufoff[k]));
 								pslide = sfmp->mappings[k].sms_address - uva[k];
 								pfound = 1;
 								break;
