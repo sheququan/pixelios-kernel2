@@ -14,7 +14,7 @@
  			uint32_t instr = 0;
  			COPYIN(get_saved_state_pc(state), (char *)&instr, sizeof(instr));
 -			printf("SWEET SIGILL: pc %#llx instr %08x esr %#x far %#llx\n",
-+			panic("SWEET SIGILL: pc %#llx instr %08x esr %#x ec %u far %#llx",
++			kprintf("SWEET SIGILL: pc %#llx instr %08x esr %#x ec %u far %#llx",
  			    (unsigned long long)get_saved_state_pc(state), instr, esr,
 -			    (unsigned long long)far);
 +			    (unsigned)class, (unsigned long long)far);
