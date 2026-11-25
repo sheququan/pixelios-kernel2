@@ -9,7 +9,7 @@
  		    thread_tid(current_thread()),
  		    (unsigned long long)get_saved_state_pc(state), esr,
  		    (unsigned)class, (unsigned long long)far);
-@@ -771,9 +771,9 @@
+@@ -771,9 +771,17 @@
  		if (is_user) {
  			uint32_t instr = 0;
  			COPYIN(get_saved_state_pc(state), (char *)&instr, sizeof(instr));
@@ -18,6 +18,14 @@
  			    (unsigned long long)get_saved_state_pc(state), instr, esr,
 -			    (unsigned long long)far);
 +			    (unsigned)class, (unsigned long long)far);
++			/* SWEET (0280): who jumped to the bad pc?  lr names the
++			 * caller, x8 is the usual indirect-call target, x0 the
++			 * receiver/argument.  Keep it to one short line so the
++			 * console does not clip it (F141). */
++			kprintf("SWEET SIGREG: lr %#llx x8 %#llx x0 %#llx\n",
++			    (unsigned long long)get_saved_state_lr(state),
++			    (unsigned long long)get_saved_state_reg(state, 8),
++			    (unsigned long long)get_saved_state_reg(state, 0));
  		}
  
  		handle_uncategorized(&context->ss);
