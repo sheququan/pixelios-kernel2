@@ -28,7 +28,7 @@ if anchor not in s:
 
 probe = r'''	/*
 	 * SWEET (0274): F216 traced the bad branch target to file offset
-	 * 0xddc0138 of dyld_shared_cache_arm64.27.dylddata; the bytes there
+	 * 0xddc138 of dyld_shared_cache_arm64.27.dylddata; the bytes there
 	 * are an arm64e chained-fixup word, not a rebased pointer.  Print the
 	 * file's mappings, the on-disk words and the words user space got.
 	 * Identical: fixups never ran.  Different: overwritten or rebased
@@ -38,7 +38,7 @@ probe = r'''	/*
 	{
 		static char sweet_fix_disk[4096];
 		static const uint64_t sweet_fix_size = 0x000000000b270000ULL;
-		static const off_t sweet_fix_foff = 0x0ddc0138LL;
+		static const off_t sweet_fix_foff = 0x0ddc138LL;
 		uint32_t sweet_fix_i, sweet_fix_j;
 
 		for (sweet_fix_i = 0; sweet_fix_i < files_count &&
