@@ -1,0 +1,15 @@
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -865,9 +865,11 @@
+ 			 * was handed to us as zeroes; say whether the pager touched
+ 			 * it after the forced fill.  Formatted, not printed: see
+ 			 * F86 for why printf() is not usable here. */
+ 			sweet_tr_after_format(sweet_zpage, sizeof(sweet_zpage));
+-			panic("SWEET SIGILL: pc %#llx instr %08x esr %#x ec %u far %#llx\n%s%s%s",
++			/* SWEET SIGILL-NOPANIC (0279): keep the kernel alive; let the
++			 * process take the SIGILL so the console shows what follows. */
++			kprintf("SWEET SIGILL: pc %#llx instr %08x esr %#x ec %u far %#llx\n%s%s%s",
+ 			    (unsigned long long)get_saved_state_pc(state), instr, esr,
+ 			    (unsigned)class, (unsigned long long)far,
+ 			    sweet_wrline, sweet_sigpa, sweet_zpage);
+ 		}
