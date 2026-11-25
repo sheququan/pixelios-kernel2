@@ -1,0 +1,53 @@
+--- a/bsd/vm/vm_unix.c
++++ b/bsd/vm/vm_unix.c
+@@ -2953,6 +2953,50 @@ _shared_region_map_and_slide(
+ 
+ 		printf("SWEET PCHK %d/%d: %s\n", sweet_pchk_bad, sweet_pchk_n,
+ 		    sweet_pchk_line);
++
++		/*
++		 * SWEET (0272): the cluster at file offset 0x4778000 is the one
++		 * R151 could not page in (F209) and the one R143's bad branch
++		 * target came out of (F208/F210).  Do NOT touch the user page
++		 * here -- that is what wedged the map syscall -- only ask
++		 * VNOP_BLOCKMAP what it maps to and read the first word straight
++		 * off the device.  Printed as "<file size in hex>:<word>:<bpn>"
++		 * so the subcache can be recognised offline by its size alone.
++		 */
++		{
++			static char sweet_bm_disk[4096];
++			vfs_context_t sweet_bm_ctx = vfs_context_current();
++			uint32_t sweet_bm_i;
++
++			printf("SWEET BMAP:");
++			for (sweet_bm_i = 0; sweet_bm_i < files_count &&
++			    sweet_bm_i < 46; sweet_bm_i++) {
++				struct _sr_file_mappings *sfmp = &sr_file_mappings[sweet_bm_i];
++				daddr64_t sbpn = 0;
++				size_t srun = 0;
++				uint32_t sw = 0;
++				int se;
++
++				if (sfmp->mappings_count == 0 || sfmp->vp == NULL ||
++				    sfmp->file_size <= 0x477c000) {
++					continue;
++				}
++				se = VNOP_BLOCKMAP(sfmp->vp, (off_t)0x4778000, 4096,
++				    &sbpn, &srun, NULL, VNODE_READ, sweet_bm_ctx);
++				if (se != 0 || sbpn < 0) {
++					printf(" %llx:e%d", (unsigned long long)sfmp->file_size, se);
++					continue;
++				}
++				if (sweet_ufs_read_at(sbpn, 4096, sweet_bm_disk) == 0) {
++					bcopy(sweet_bm_disk, &sw, sizeof(sw));
++				}
++				printf(" %llx:%08x:%llx:%llu",
++				    (unsigned long long)sfmp->file_size, sw,
++				    (unsigned long long)sbpn,
++				    (unsigned long long)srun);
++			}
++			printf("\n");
++		}
+ 	}
+ 
+ 	/*
