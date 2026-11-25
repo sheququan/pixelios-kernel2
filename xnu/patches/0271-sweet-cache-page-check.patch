@@ -72,7 +72,7 @@
  static int
  _shared_region_map_and_slide(
  	struct proc                         *p,
-@@ -2854,6 +2919,73 @@ _shared_region_map_and_slide(
+@@ -2854,6 +2919,42 @@ _shared_region_map_and_slide(
  	sweet_srmap_kr = (int)kr;
  	sweet_srmap_error = error;
  
@@ -81,7 +81,7 @@
 +	sweet_pchk_line[0] = 0;
 +	sweet_pchk_line2[0] = 0;
 +	if (error == 0 && sr_file_mappings != NULL) {
-+		uint32_t sweet_chk_i, sweet_chk_n2 = 0, sweet_chk_bad2 = 0;
++		uint32_t sweet_chk_i;
 +
 +		for (sweet_chk_i = 0; sweet_chk_i < files_count &&
 +		    sweet_chk_i < 46; sweet_chk_i++) {
@@ -108,39 +108,8 @@
 +		}
 +		sweet_pchk_line[sweet_pchk_n] = 0;
 +
-+		/*
-+		 * Second sample: the exact page the R143 target came out of, in
-+		 * every file big enough to hold it (only .19 owns that offset,
-+		 * the rest are control samples).
-+		 */
-+		for (sweet_chk_i = 0; sweet_chk_i < files_count &&
-+		    sweet_chk_i < 46 && sweet_chk_n2 < 46; sweet_chk_i++) {
-+			struct _sr_file_mappings *sfmp = &sr_file_mappings[sweet_chk_i];
-+			struct shared_file_mapping_slide_np *smp;
-+			char sweet_c;
-+
-+			if (sfmp->mappings_count == 0 || sfmp->vp == NULL ||
-+			    sfmp->file_size <= 0x477c000) {
-+				continue;
-+			}
-+			smp = &sfmp->mappings[0];
-+			if ((smp->sms_init_prot & VM_PROT_ZF) ||
-+			    smp->sms_size <= 0x477c000) {
-+				continue;
-+			}
-+			sweet_c = sweet_chk_page(sfmp->vp,
-+			    (user_addr_t)(smp->sms_address + 0x477c000),
-+			    (off_t)0x477c000, "r143");
-+			if (sweet_c == 'X') {
-+				sweet_chk_bad2++;
-+			}
-+			sweet_pchk_line2[sweet_chk_n2++] = sweet_c;
-+		}
-+		sweet_pchk_line2[sweet_chk_n2] = 0;
 +		printf("SWEET PCHK %d/%d: %s\n", sweet_pchk_bad, sweet_pchk_n,
 +		    sweet_pchk_line);
-+		printf("SWEET PCHK2 %u/%u: %s\n", sweet_chk_bad2, sweet_chk_n2,
-+		    sweet_pchk_line2);
 +	}
 +
  	/*
@@ -148,7 +117,7 @@
  	 */
 --- a/osfmk/arm64/sleh.c
 +++ b/osfmk/arm64/sleh.c
-@@ -1327,23 +1327,66 @@ handle_pc_align(arm_saved_state_t *ss)
+@@ -1327,23 +1327,63 @@ handle_pc_align(arm_saved_state_t *ss)
  #endif /* __has_feature(ptrauth_calls) */
  
  	/*
@@ -209,9 +178,6 @@
 +				    (unsigned long long)sweet_w);
 +				sweet_hits++;
 +			}
-+		}
-+		if (sweet_pchk_n != 0) {
-+			printf("SWEET PCHK2: %s\n", sweet_pchk_line2);
 +		}
 +		panic("SWEET PCALIGN: pc %#llx sctlr %#llx pchk %d/%d %s",
  		    (unsigned long long)sweet_pc,
