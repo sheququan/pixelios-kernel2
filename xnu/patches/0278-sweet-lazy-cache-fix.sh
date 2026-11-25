@@ -50,17 +50,19 @@ struct sweet_cache_map sweet_cache_maps[16];
 int sweet_cache_map_count;
 
 void
-sweet_cache_fix_page(void *vp, uint64_t foff)
+sweet_cache_fix_page(void *vp, uint64_t foff, void *upl, uint32_t pl_offset)
 {
-	extern uint64_t pmap_find_pa(pmap_t, addr64_t);
-	extern pmap_t current_pmap(void);
 	extern void ml_phys_write_double_64(addr64_t, unsigned long long);
 	extern unsigned long long ml_phys_read_double_64(addr64_t);
+	extern ppnum_t upl_phys_page(upl_page_info_t *upl, int index);
 	int i;
 
 	for (i = 0; i < sweet_cache_map_count; i++) {
 		struct sweet_cache_map *m = &sweet_cache_maps[i];
-		uint64_t va, pa, o;
+		upl_page_info_t *pl;
+		uint64_t pa, o;
+		uint32_t idx;
+		ppnum_t pp;
 
 		if (m->vp != vp) {
 			continue;
@@ -69,16 +71,24 @@ sweet_cache_fix_page(void *vp, uint64_t foff)
 		    foff >= m->file_offset + m->size) {
 			continue;
 		}
-		va = m->slid_base + (foff - m->file_offset);
 		/*
-		 * Read the physical page directly: a copyin() here would go
-		 * back into the VM while this very page-in still holds the
-		 * UPL, which deadlocks on SWEET.
+		 * Take the physical page from the UPL that cluster_pagein()
+		 * just filled.  Looking it up through current_pmap() is wrong
+		 * here: the page-in may run on a kernel thread, whose pmap has
+		 * nothing to do with this VA, and a stray write through a
+		 * wrong pa corrupts the kernel (R173 died with a kernel data
+		 * abort right after finishing the cache pages).
 		 */
-		pa = pmap_find_pa(current_pmap(), (addr64_t)va);
-		if (pa == 0) {
+		pl = UPL_GET_INTERNAL_PAGE_LIST((upl_t)upl);
+		if (pl == NULL) {
 			return;
 		}
+		idx = pl_offset >> PAGE_SHIFT;
+		pp = upl_phys_page(pl, (int)idx);
+		if (pp == 0) {
+			return;
+		}
+		pa = (uint64_t)pp << PAGE_SHIFT;
 		for (o = 0; o < 0x4000; o += 8) {
 			uint64_t v = ml_phys_read_double_64((addr64_t)(pa + o));
 			uint64_t t, np;
@@ -113,7 +123,6 @@ sweet_cache_fix_page(void *vp, uint64_t foff)
 		return;
 	}
 }
-
 '''
 s = s.replace(fn_anchor, helper + fn_anchor, 1)
 
@@ -223,9 +232,11 @@ ins = [
     "\t\t * registry is empty unless the file is .27.dylddata.",
     "\t\t */",
     "\t\tif (error == 0) {",
-    "\t\t\textern void sweet_cache_fix_page(void *vp, uint64_t foff);",
+    "\t\t\textern void sweet_cache_fix_page(void *vp, uint64_t foff,",
+    "\t\t\t    void *upl, uint32_t pl_offset);",
     "",
-    "\t\t\tsweet_cache_fix_page(vp, (uint64_t)f_offset);",
+    "\t\t\tsweet_cache_fix_page(vp, (uint64_t)f_offset,",
+    "\t\t\t    (void *)upl, (uint32_t)offset);",
     "\t\t}",
 ]
 lines[i + 1:i + 1] = ins
