@@ -40,7 +40,7 @@ probe = r'''	/*
 		static const uint64_t sweet_fix_size = 0x000000000b270000ULL;
 		static const off_t sweet_fix_foff = 0x0ddc138LL;
 		uint32_t sweet_fix_i, sweet_fix_j;
-		uint64_t sweet_fix_new;
+		uint64_t sweet_fix_new, sweet_fix_pa;
 		int sweet_fix_put;
 
 		for (sweet_fix_i = 0; sweet_fix_i < files_count &&
@@ -103,12 +103,42 @@ probe = r'''	/*
 
 			/* SWEET (0275 merged): one-slot diagnostic.  The raw word
 			 * decodes as target30=0x1177e2d0, cacheLevel=2.  Try the
-			 * shared-region base (0x180000000) as basePointers[2]. */
-			sweet_fix_new = 0x000000019177e2d0ULL;
-			sweet_fix_put = copyout(&sweet_fix_new, sweet_fix_va,
-			    sizeof(sweet_fix_new));
-			printf("SWEET FIXPUT: err %d val %#llx\n", sweet_fix_put,
-			    (unsigned long long)sweet_fix_new);
+			 * shared-region base (0x180000000) as basePointers[2].
+			 * copyout() wedges here (read-only page + broken COW on
+			 * SWEET), so write the physical page directly like the
+			 * exec fill path does. */
+			{
+				extern uint64_t pmap_find_pa(pmap_t, addr64_t);
+				extern pmap_t current_pmap(void);
+				extern void ml_phys_write_double_64(addr64_t, unsigned long long);
+				uintptr_t sweet_fix_cv;
+
+				sweet_fix_new = 0x000000019177e2d0ULL;
+				sweet_fix_pa = pmap_find_pa(current_pmap(),
+				    (addr64_t)sweet_fix_va);
+				printf("SWEET FIXPA: pa %#llx\n",
+				    (unsigned long long)sweet_fix_pa);
+				if (sweet_fix_pa != 0) {
+					ml_phys_write_double_64(
+					    (addr64_t)(sweet_fix_pa +
+					        ((uint64_t)sweet_fix_va & 0x3fffULL)),
+					    (unsigned long long)sweet_fix_new);
+					for (sweet_fix_cv = (uintptr_t)sweet_fix_va;
+					    sweet_fix_cv < (uintptr_t)sweet_fix_va + 8;
+					    sweet_fix_cv += 64) {
+						__asm__ volatile("dc civac, %0" :: "r"(sweet_fix_cv) : "memory");
+					}
+					__asm__ volatile("dsb sy" ::: "memory");
+					__asm__ volatile("ic ialluis" ::: "memory");
+					__asm__ volatile("dsb sy" ::: "memory");
+					__asm__ volatile("isb" ::: "memory");
+					sweet_fix_put = 0;
+				} else {
+					sweet_fix_put = EFAULT;
+				}
+				printf("SWEET FIXPUT: err %d val %#llx\n", sweet_fix_put,
+				    (unsigned long long)sweet_fix_new);
+			}
 		}
 	}
 
