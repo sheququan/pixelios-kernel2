@@ -1,0 +1,28 @@
+--- a/bsd/sweet_hfs/core/hfs_readwrite.c
++++ b/bsd/sweet_hfs/core/hfs_readwrite.c
+@@ -4912,6 +4912,25 @@ retry_pagein:
+ #endif
+ 		error = cluster_pagein(vp, upl, offset, f_offset, xsize, (off_t)fp->ff_size, ap->a_flags);
+ 
++		/*
++		 * SWEET (0273): the cluster at file offset 0x4778000 never becomes
++		 * a valid user page (F209/F214).  Two very different bugs produce
++		 * that symptom, and the return value tells them apart: a read error
++		 * means cluster_pagein failed and the page was left empty, while err 0
++		 * on every attempt means the UPL/vm side dropped the page after it had
++		 * been filled.  Bounded to eight lines.
++		 */
++		{
++			static int sweet_pg_n;
++
++			if (ap->a_f_offset == 0x4778000 && sweet_pg_n < 8) {
++				sweet_pg_n++;
++				printf("SWEET PGRET: n %d err %d xsize %d foff %lld ffsize %lld\n",
++				    sweet_pg_n, error, xsize,
++				    (long long)f_offset, (long long)fp->ff_size);
++			}
++		}
++
+ 		/*
+ 		 * Keep track of blocks read.
+ 		 */
