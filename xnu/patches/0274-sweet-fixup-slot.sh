@@ -40,6 +40,8 @@ probe = r'''	/*
 		static const uint64_t sweet_fix_size = 0x000000000b270000ULL;
 		static const off_t sweet_fix_foff = 0x0ddc138LL;
 		uint32_t sweet_fix_i, sweet_fix_j;
+		uint64_t sweet_fix_new;
+		int sweet_fix_put;
 
 		for (sweet_fix_i = 0; sweet_fix_i < files_count &&
 		    sweet_fix_i < 46; sweet_fix_i++) {
@@ -98,6 +100,15 @@ probe = r'''	/*
 			    (unsigned long long)sweet_fix_va, cerr,
 			    sweet_fix_mw[0], sweet_fix_mw[1],
 			    sweet_fix_mw[2], sweet_fix_mw[3]);
+
+			/* SWEET (0275 merged): one-slot diagnostic.  The raw word
+			 * decodes as target30=0x1177e2d0, cacheLevel=2.  Try the
+			 * shared-region base (0x180000000) as basePointers[2]. */
+			sweet_fix_new = 0x000000019177e2d0ULL;
+			sweet_fix_put = copyout(&sweet_fix_new, sweet_fix_va,
+			    sizeof(sweet_fix_new));
+			printf("SWEET FIXPUT: err %d val %#llx\n", sweet_fix_put,
+			    (unsigned long long)sweet_fix_new);
 		}
 	}
 
