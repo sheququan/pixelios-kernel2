@@ -40,8 +40,6 @@ probe = r'''	/*
 		static const uint64_t sweet_fix_size = 0x000000000b270000ULL;
 		static const off_t sweet_fix_foff = 0x0ddc138LL;
 		uint32_t sweet_fix_i, sweet_fix_j;
-		uint64_t sweet_fix_new, sweet_fix_pa;
-		int sweet_fix_put;
 
 		for (sweet_fix_i = 0; sweet_fix_i < files_count &&
 		    sweet_fix_i < 46; sweet_fix_i++) {
@@ -101,24 +99,24 @@ probe = r'''	/*
 			    sweet_fix_mw[0], sweet_fix_mw[1],
 			    sweet_fix_mw[2], sweet_fix_mw[3]);
 
-			/* SWEET (0276): the one-slot rewrite in R165 only moved
-			 * the panic to another raw slot, which means the whole
-			 * fixup table is unapplied.  Before rewriting anything,
-			 * print the file's real mapping table: the unslid VA comes
-			 * from the file header, the slid VA from the kernel
-			 * mapping, so their difference is the slide this mapping
-			 * got.  Then batch-fix every KERNEL_CACHE rebase word in
-			 * the two pages around the known-bad offset, writing
-			 * basePointers + target30 + slide with basePointers =
-			 * 0x180000000 (verified offline: 0x19177e2d0 lands inside
-			 * dylib #65 at 0x1916da000). */
+			/* SWEET (0277): R167 proved the formula.  Rewriting the
+			 * two pages around the bad offset (1220 slots) moved the
+			 * panic from LR 0x1029a2b04 to 0x1005cab04, so
+			 * 0x180000000 + target30 + slide is the correct rebase and
+			 * these slots are on launchd's path.  Now do it for every
+			 * page of the two data mappings: .27.dylddata's __DATA is
+			 * ~7.1M unapplied rebase words and launchd dies on the
+			 * first one it reads.  Print progress every 512 pages so
+			 * the watchdog sees activity. */
 			{
 				extern uint64_t pmap_find_pa(pmap_t, addr64_t);
 				extern pmap_t current_pmap(void);
 				extern void ml_phys_write_double_64(addr64_t, unsigned long long);
+				static char sweet_pg[0x4000];
 				uint32_t k;
 				uint64_t uva[8], usz[8], ufoff[8];
 				uint32_t hmo = 0, hmc = 0;
+				uint64_t fixed = 0, pages = 0, skipped = 0;
 
 				for (k = 0; k < 8; k++) { uva[k] = 0; usz[k] = 0; ufoff[k] = 0; }
 				bzero(sweet_fix_disk, sizeof(sweet_fix_disk));
@@ -150,43 +148,26 @@ probe = r'''	/*
 					    (unsigned long long)(sfmp->mappings[k].sms_address - uva[k]));
 				}
 
-				/* batch: two 16K pages covering 0xddb000..0xddd000 */
-				{
-					static char sweet_pg[0x4000];
-					uint32_t fixed = 0, seen = 0;
-					int pg;
-					for (pg = 0; pg < 2; pg++) {
-						off_t pfoff = (pg == 0) ? 0xdd8000LL : 0xddc000LL;
-						user_addr_t pva = 0;
-						uint64_t pslide = 0, utarget;
-						uint32_t o;
-						int pfound = 0;
+				/* map1 and map2 are the data segments (prot 3/1, 3/3) */
+				for (k = 1; k < hmc && k <= 2; k++) {
+					uint64_t pslide = sfmp->mappings[k].sms_address - uva[k];
+					uint64_t sz = usz[k];
+					uint64_t off;
 
-						for (k = 0; k < hmc; k++) {
-							if (ufoff[k] <= (uint64_t)pfoff &&
-							    (uint64_t)pfoff < ufoff[k] + usz[k]) {
-								pva = (user_addr_t)(sfmp->mappings[k].sms_address +
-								    ((uint64_t)pfoff - ufoff[k]));
-								pslide = sfmp->mappings[k].sms_address - uva[k];
-								pfound = 1;
-								break;
-							}
-						}
-						if (!pfound) {
-							printf("SWEET BATCH: page %#llx unmapped\n",
-							    (unsigned long long)pfoff);
-							continue;
-						}
+					for (off = 0; off + 0x4000 <= sz; off += 0x4000) {
+						user_addr_t pva = (user_addr_t)
+						    (sfmp->mappings[k].sms_address + off);
+						uint32_t o;
+
 						bzero(sweet_pg, sizeof(sweet_pg));
 						if (copyin(pva, sweet_pg, sizeof(sweet_pg)) != 0) {
-							printf("SWEET BATCH: copyin %#llx failed\n",
-							    (unsigned long long)pva);
+							skipped++;
 							continue;
 						}
-						utarget = 0x180000000ULL;
-						for (o = 0; o + 8 <= sizeof(sweet_pg); o += 8) {
+						for (o = 0; o + 8 <= 0x4000; o += 8) {
 							uint64_t v = *(uint64_t *)(sweet_pg + o);
 							uint64_t t, np, pa;
+
 							if (v == 0) continue;
 							if ((v >> 63) & 1) continue;
 							if (((v >> 51) & 0xfff) != 0) continue;
@@ -195,7 +176,9 @@ probe = r'''	/*
 							if (((v >> 48) & 7) != 0) continue;
 							t = v & 0x3fffffffULL;
 							if (t == 0) continue;
-							np = utarget + t + pslide;
+							np = 0x180000000ULL + t + pslide;
+							if (np < 0x180000000ULL || np >= 0x210000000ULL)
+								continue;
 							pa = pmap_find_pa(current_pmap(),
 							    (addr64_t)(pva + o));
 							if (pa == 0) continue;
@@ -205,10 +188,19 @@ probe = r'''	/*
 							    (unsigned long long)np);
 							fixed++;
 						}
-						seen++;
+						pages++;
+						if ((pages & 0x1ff) == 0) {
+							printf("SWEET FULLFIX: pages %llu fixed %llu skip %llu\n",
+							    (unsigned long long)pages,
+							    (unsigned long long)fixed,
+							    (unsigned long long)skipped);
+						}
 					}
-					printf("SWEET BATCH: pages %u fixed %u\n", seen, fixed);
 				}
+				printf("SWEET FULLFIX: DONE pages %llu fixed %llu skip %llu\n",
+				    (unsigned long long)pages,
+				    (unsigned long long)fixed,
+				    (unsigned long long)skipped);
 			}
 		}
 	}
