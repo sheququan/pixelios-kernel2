@@ -9,27 +9,48 @@
  		    thread_tid(current_thread()),
  		    (unsigned long long)get_saved_state_pc(state), esr,
  		    (unsigned)class, (unsigned long long)far);
-@@ -771,9 +771,20 @@
+@@ -771,9 +771,41 @@
  		if (is_user) {
  			uint32_t instr = 0;
 +			extern uint64_t sweet_dyld_base, sweet_main_base;
++			extern uint64_t sweet_entry;
++			extern uint32_t sweet_entry_word;
++			uint64_t sweet_pc = get_saved_state_pc(state);
++			uint64_t sweet_base = sweet_dyld_base;
++			uint64_t sweet_off = sweet_pc;
++			const char *sweet_k = "D";
  			COPYIN(get_saved_state_pc(state), (char *)&instr, sizeof(instr));
++			/* SWEET (R180): name the image and the offset in one short
++			 * token; the on-screen font is too coarse for full 64-bit
++			 * values, and F141 cuts long tokens at the right edge. */
++			if (sweet_pc < sweet_dyld_base ||
++			    sweet_pc >= sweet_dyld_base + 0xe4000) {
++				if (sweet_pc >= sweet_main_base &&
++				    sweet_pc < sweet_main_base + 0x90000) {
++					sweet_k = "M";
++					sweet_base = sweet_main_base;
++				} else {
++					sweet_k = "X";
++					sweet_base = 0;
++				}
++			}
++			if (sweet_base != 0 && sweet_pc >= sweet_base) {
++				sweet_off = sweet_pc - sweet_base;
++			}
 -			printf("SWEET SIGILL: pc %#llx instr %08x esr %#x far %#llx\n",
 -			    (unsigned long long)get_saved_state_pc(state), instr, esr,
 -			    (unsigned long long)far);
-+			/* SWEET (R177): F247 could not say which image owns pc.
-+			 * Print both load bases next to pc/lr; no extra COPYIN here,
-+			 * a second user access in the exception path can wedge the
-+			 * handler (R177 never reached a panic). */
 +			panic("SWEET SIGILL\n"
-+			    "pc %#llx lr %#llx\n"
-+			    "db %#llx mb %#llx\n"
-+			    "in %08x es %#x",
-+			    (unsigned long long)get_saved_state_pc(state),
++			    "k %s %llx\n"
++			    "p %llx\n"
++			    "l %llx\n"
++			    "e %llx\n"
++			    "w %08x",
++			    sweet_k, (unsigned long long)sweet_off,
++			    (unsigned long long)sweet_pc,
 +			    (unsigned long long)get_saved_state_lr(state),
-+			    (unsigned long long)sweet_dyld_base,
-+			    (unsigned long long)sweet_main_base,
-+			    instr, esr);
++			    (unsigned long long)sweet_entry,
++			    sweet_entry_word);
  		}
  
  		handle_uncategorized(&context->ss);
@@ -49,7 +70,7 @@
  	__builtin_unreachable();
 --- a/bsd/kern/kern_exec.c
 +++ b/bsd/kern/kern_exec.c
-@@ -7745,6 +7745,27 @@
+@@ -7745,6 +7745,31 @@
  	 */
  	printf("SWEET EXEC: %s entry %#llx prefault %d\n",
  	    imgp->ip_vp->v_name, (unsigned long long)load_result->entry_point, kr);
@@ -68,11 +89,15 @@
 +	 */
 +	{
 +		uint32_t insn[4] = { 0, 0, 0, 0 };
++		extern uint64_t sweet_entry;
++		extern uint32_t sweet_entry_word;
 +		int cierr = copyin((user_addr_t)load_result->entry_point,
 +		    (char *)insn, sizeof(insn));
 +
 +		printf("SWEET EXEC: %s insns %08x %08x %08x %08x (copyin %d)\n",
 +		    imgp->ip_vp->v_name, insn[0], insn[1], insn[2], insn[3], cierr);
++		sweet_entry = load_result->entry_point;
++		sweet_entry_word = insn[0];
 +	}
  	if (kr != KERN_SUCCESS) {
  		DEBUG4K_ERROR("map %p va 0x%llx -> 0x%x\n", current_map(), (uint64_t)vm_map_trunc_page(load_result->entry_point, vm_map_page_mask(current_map())), kr);

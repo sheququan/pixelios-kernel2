@@ -68,6 +68,8 @@ int sweet_cache_map_count;
  * the SIGILL panic so a stray pc can be attributed to an image on screen. */
 uint64_t sweet_dyld_base;
 uint64_t sweet_main_base;
+uint64_t sweet_entry;
+uint32_t sweet_entry_word;
 
 static int
 sweet_cache_read(void *vp, uint64_t off, uint32_t len, void *dst)
