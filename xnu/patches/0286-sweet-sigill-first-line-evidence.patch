@@ -1,0 +1,59 @@
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -866,10 +866,52 @@
+ 			 * it after the forced fill.  Formatted, not printed: see
+ 			 * F86 for why printf() is not usable here. */
+ 			sweet_tr_after_format(sweet_zpage, sizeof(sweet_zpage));
+-			panic("SWEET SIGILL: pc %#llx instr %08x esr %#x ec %u far %#llx\n%s%s%s",
+-			    (unsigned long long)get_saved_state_pc(state), instr, esr,
+-			    (unsigned)class, (unsigned long long)far,
+-			    sweet_wrline, sweet_sigpa, sweet_zpage);
++			/* SWEET (R187): the panel only ever shows the FIRST panic line
++			 * before the reset, so put the physical evidence up front: the
++			 * pa pc maps to and the words stored there (is the mapped frame
++			 * zero, or another page?), and the exec-fill record for this
++			 * page plus the words at the frame the fill wrote (did the fill
++			 * data survive in DRAM?).  Also unmute the console: the QR
++			 * stream keeps it muted and 0259 showed muted consoles hide
++			 * panic text. */
++			{
++				extern int sweet_console_muted;
++
++				uint64_t spg = get_saved_state_pc(state) &
++				    ~(uint64_t)(PAGE_SIZE - 1);
++				uint64_t spa = kvtophys((vm_offset_t)get_saved_state_pc(state));
++				uint64_t spgpa = spa & ~(uint64_t)(PAGE_SIZE - 1);
++				unsigned int pgw0 = 0, pgw1 = 0, ew0 = 0, ew1 = 0;
++				unsigned int fpw0 = 0, fpw1 = 0;
++				uint64_t sfpa = 0;
++				int swi, sfd = -1;
++
++				sweet_console_muted = 0;
++				if (spa != 0 && spa < 0x10000000000ULL) {
++					pgw0 = ml_phys_read_word_64(spgpa);
++					pgw1 = ml_phys_read_word_64(spgpa + 4);
++					ew0 = ml_phys_read_word_64(spa);
++					ew1 = ml_phys_read_word_64(spa + 4);
++				}
++				for (swi = 0; swi < sweet_wr_n && swi < 128; swi++) {
++					if (sweet_wr_va[swi] == spg) {
++						sfd = swi;
++						break;
++					}
++				}
++				if (sfd >= 0) {
++					sfpa = (uint64_t)sweet_wr_pn[sfd] << PAGE_SHIFT;
++					if (sfpa != 0 && sfpa < 0x10000000000ULL) {
++						fpw0 = ml_phys_read_word_64(sfpa);
++						fpw1 = ml_phys_read_word_64(sfpa + 4);
++					}
++				}
++				panic("SWEET SIGILL2: pa %#llx pgw %08x %08x ew %08x %08x fillpa %#llx fillw %08x %08x fillidx %d pc %#llx instr %08x esr %#x ec %u far %#llx\n%s",
++				    spgpa, pgw0, pgw1, ew0, ew1, sfpa, fpw0, fpw1,
++				    sfd, (unsigned long long)get_saved_state_pc(state),
++				    instr, esr, (unsigned)class, (unsigned long long)far,
++				    sweet_zpage);
++			}
+ 		}
+ 
+ 		handle_uncategorized(&context->ss);
