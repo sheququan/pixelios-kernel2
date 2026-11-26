@@ -155,3 +155,16 @@
  static kern_return_t vm_shared_region_slide_sanity_check(vm_shared_region_slide_info_entry_t entry, mach_vm_size_t size);
  static void vm_shared_region_timeout(thread_call_param_t param0,
      thread_call_param_t param1);
+--- a/osfmk/vm/vm_shared_region.c
++++ b/osfmk/vm/vm_shared_region.c
+@@ -146,7 +146,10 @@ sweet_sr_dump(void *srp)
+ 	if (sr == NULL) {
+ 		printf("SWEET SRDUMP: no region\n");
+ 		return;
+ 	}
++	/* SWEET (R197): check_np fallback asks us to install a synthetic
++	 * first mapping (0283 v1 semantics) before we describe the region. */
++	sr->sr_first_mapping = 0;
+ 	printf("SWEET SRDUMP: base %#llx size %#llx ref %u first %#llx "
+ 	    "map_in_progress %d stale %d slide %#x\n",
+ 	    (unsigned long long)sr->sr_base_address,
