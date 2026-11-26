@@ -122,6 +122,8 @@ sweet_cache_register(void *vp, uint64_t unslid_va, uint64_t slid_va,
 		return;
 	}
 	if (sweet_cache_read(vp, slide_off, 0x28, hdr) != 0) {
+		printf("SWEET SLIDE: read fail off %#llx size %#llx\n",
+		    (unsigned long long)slide_off, (unsigned long long)slide_size);
 		return;
 	}
 	ver = *(uint32_t *)(void *)(hdr + 0);
@@ -132,7 +134,9 @@ sweet_cache_register(void *vp, uint64_t unslid_va, uint64_t slid_va,
 	pec = *(uint32_t *)(void *)(hdr + 20);
 	if (ver != 2 || psz == 0 || psc == 0 || psc > 0x40000 ||
 	    *(uint64_t *)(void *)(hdr + 24) == 0) {
-		printf("SWEET SLIDE: skip ver %u psz %u cnt %u\n", ver, psz, psc);
+		printf("SWEET SLIDE: skip off %#llx ver %u psz %u cnt %u w0 %08x\n",
+		    (unsigned long long)slide_off, ver, psz, psc,
+		    *(uint32_t *)(void *)hdr);
 		return;
 	}
 	m = &sweet_cache_maps[sweet_cache_map_count];

@@ -1,0 +1,20 @@
+--- a/bsd/vm/vm_unix.c
++++ b/bsd/vm/vm_unix.c
+@@ -2145,6 +2145,17 @@
+ 			/* retrieve address of its first mapping... */
+ 			kr = vm_shared_region_start_address(shared_region, &start_address, task);
+ 			if (kr != KERN_SUCCESS) {
++				/* SWEET (R184): dyld4 maps the cache via
++				 * map_with_linking_np, which never sets
++				 * sr_first_mapping.  A later check_np then fails
++				 * even though the cache is mapped in the task.
++				 * Treat base+0 as the first mapping so dyld can
++				 * continue. */
++				shared_region->sr_first_mapping = 0;
++				kr = vm_shared_region_start_address(shared_region,
++				    &start_address, task);
++			}
++			if (kr != KERN_SUCCESS) {
+ 				/* SWEET (0247): say why the region is unusable instead of
+ 				 * only that it is.  After a failed map_and_slide the region
+ 				 * can be left with no first mapping, and every later
