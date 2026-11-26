@@ -1,5 +1,5 @@
 --- a/osfmk/arm64/sleh.c	2026-11-26 17:47:20.088763700 +0800
-+++ b/osfmk/arm64/sleh.c	2026-11-26 17:50:42.341342200 +0800
++++ b/osfmk/arm64/sleh.c	2026-11-26 18:08:22.031491900 +0800
 @@ -1901,6 +1901,45 @@
  		kprintf("Unclassified kernel abort (fault_code=0x%x)\n", fault_code);
  	}
@@ -14,8 +14,8 @@
 +		uint64_t *sfp = (uint64_t *)(uintptr_t)get_saved_state_fp(state);
 +		uint64_t sfar = (uint64_t)(uintptr_t)fault_addr;
 +		uint64_t sabeg, saend;
-+		extern void *vm_page_array_beginning_addr;
-+		extern void *vm_page_array_ending_addr;
++		extern vm_page_t vm_page_array_beginning_addr;
++		extern vm_page_t vm_page_array_ending_addr;
 +		int sfi;
 +
 +		sabeg = (uint64_t)(uintptr_t)vm_page_array_beginning_addr;
