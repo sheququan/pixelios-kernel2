@@ -1,0 +1,15 @@
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -900,9 +900,8 @@
+ 						fpw1 = ml_phys_read_word_64(sfpa + 4);
+ 					}
+ 				}
+-				panic("SWEET SIGILL2: pa %#llx pgw %08x %08x ew %08x %08x fillpa %#llx fillw %08x %08x fillidx %d pc %#llx instr %08x esr %#x ec %u far %#llx\n%s",
++				panic("SWEET ZP pc %llx pa %llx\nSWEET ZW pg %x %x ew %x %x\nSWEET ZF fp %llx fw %x %x i %d\n%s",
++				    (unsigned long long)get_saved_state_pc(state),
+ 				    spgpa, pgw0, pgw1, ew0, ew1, sfpa, fpw0, fpw1,
+-				    sfd, (unsigned long long)get_saved_state_pc(state),
+-				    instr, esr, (unsigned)class, (unsigned long long)far,
+-				    sweet_zpage);
++				    sfd, sweet_zpage);
+ 			}
