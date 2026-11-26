@@ -72,14 +72,39 @@ uint64_t sweet_main_base;
 static int
 sweet_cache_read(void *vp, uint64_t off, uint32_t len, void *dst)
 {
-	int resid = 0;
-	int err;
+	/*
+	 * vn_rdwr() goes through the UPL -> vm_object path that never
+	 * delivers data on SWEET (F102/F138).  Read the file straight
+	 * from the UFS device with VNOP_BLOCKMAP + sweet_ufs_read_at,
+	 * exactly like the exec fill path does.  HFS extents are 4 KiB,
+	 * so re-resolve the block number for every 4 KiB piece.
+	 */
+	extern errno_t VNOP_BLOCKMAP(vnode_t, off_t, size_t,
+	    daddr64_t *, size_t *, void *, int, vfs_context_t);
+	extern int sweet_ufs_read_at(daddr64_t, uint32_t, void *);
+	uint8_t *p = (uint8_t *)dst;
 
-	err = vn_rdwr(UIO_READ, (struct vnode *)vp, (caddr_t)dst, (int)len,
-	    (off_t)off, UIO_SYSSPACE, IO_NOCACHE, kauth_cred_get(), &resid,
-	    current_proc());
-	if (err != 0 || resid != 0) {
-		return -1;
+	while (len != 0) {
+		uint64_t piece = off & ~(uint64_t)0xfff;
+		uint32_t in = (uint32_t)(off - piece);
+		uint32_t n = 0x1000 - in;
+		daddr64_t bpn = 0;
+		size_t run = 0;
+
+		if (n > len) {
+			n = len;
+		}
+		if (VNOP_BLOCKMAP((vnode_t)vp, (off_t)piece, 0x1000, &bpn,
+		    &run, NULL, VNODE_READ, vfs_context_current()) != 0 ||
+		    bpn < 0) {
+			return -1;
+		}
+		if (sweet_ufs_read_at(bpn + (in >> 9), n, p) != 0) {
+			return -1;
+		}
+		off += n;
+		p += n;
+		len -= n;
 	}
 	return 0;
 }
