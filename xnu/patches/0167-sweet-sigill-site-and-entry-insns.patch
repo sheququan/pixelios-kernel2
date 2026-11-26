@@ -9,17 +9,33 @@
  		    thread_tid(current_thread()),
  		    (unsigned long long)get_saved_state_pc(state), esr,
  		    (unsigned)class, (unsigned long long)far);
-@@ -771,9 +771,11 @@
+@@ -771,9 +771,26 @@
  		if (is_user) {
  			uint32_t instr = 0;
++			uint32_t callinstr = 0;
++			extern uint64_t sweet_dyld_base, sweet_main_base;
  			COPYIN(get_saved_state_pc(state), (char *)&instr, sizeof(instr));
++			/* SWEET (R177): F247 could not say which image owns pc.
++			 * Print both load bases and the instruction before lr, so the
++			 * owning image and the call site are both on screen at once. */
++			if (get_saved_state_lr(state) > 4) {
++				COPYIN(get_saved_state_lr(state) - 4, (char *)&callinstr,
++				    sizeof(callinstr));
++			}
 -			printf("SWEET SIGILL: pc %#llx instr %08x esr %#x far %#llx\n",
-+			panic("SWEET SIGILL: pc %#llx instr %08x esr %#x lr %#llx x8 %#llx x0 %#llx",
- 			    (unsigned long long)get_saved_state_pc(state), instr, esr,
+-			    (unsigned long long)get_saved_state_pc(state), instr, esr,
 -			    (unsigned long long)far);
-+			    (unsigned long long)get_saved_state_lr(state),
-+			    (unsigned long long)get_saved_state_reg(state, 8),
-+			    (unsigned long long)get_saved_state_reg(state, 0));
++			panic("SWEET SIGILL\n"
++			    "pc %#llx in %08x\n"
++			    "lr %#llx c %08x\n"
++			    "db %#llx\n"
++			    "mb %#llx\n"
++			    "es %#x",
++			    (unsigned long long)get_saved_state_pc(state), instr,
++			    (unsigned long long)get_saved_state_lr(state), callinstr,
++			    (unsigned long long)sweet_dyld_base,
++			    (unsigned long long)sweet_main_base,
++			    esr);
  		}
  
  		handle_uncategorized(&context->ss);
@@ -39,10 +55,16 @@
  	__builtin_unreachable();
 --- a/bsd/kern/kern_exec.c
 +++ b/bsd/kern/kern_exec.c
-@@ -7745,6 +7745,21 @@
+@@ -7745,6 +7745,27 @@
  	 */
  	printf("SWEET EXEC: %s entry %#llx prefault %d\n",
  	    imgp->ip_vp->v_name, (unsigned long long)load_result->entry_point, kr);
++	/* SWEET (R177): remember both load bases for the SIGILL panic. */
++	{
++		extern uint64_t sweet_dyld_base, sweet_main_base;
++		sweet_dyld_base = load_result->dynlinker_mach_header;
++		sweet_main_base = load_result->mach_header;
++	}
 +	/*
 +	 * SWEET (R21): launchd gets a SIGILL within a few instructions of its
 +	 * entry point. Reading the entry instructions back through the user

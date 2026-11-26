@@ -49,6 +49,11 @@ struct sweet_cache_map {
 struct sweet_cache_map sweet_cache_maps[16];
 int sweet_cache_map_count;
 
+/* SWEET (R177): load bases of the two boot images, set at exec and read by
+ * the SIGILL panic so a stray pc can be attributed to an image on screen. */
+uint64_t sweet_dyld_base;
+uint64_t sweet_main_base;
+
 void
 sweet_cache_fix_page(void *vp, uint64_t foff, void *upl, uint32_t pl_offset)
 {
