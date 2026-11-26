@@ -1,0 +1,48 @@
+--- a/osfmk/arm64/sleh.c	2026-11-26 17:47:20.088763700 +0800
++++ b/osfmk/arm64/sleh.c	2026-11-26 17:50:42.341342200 +0800
+@@ -1901,6 +1901,45 @@
+ 		kprintf("Unclassified kernel abort (fault_code=0x%x)\n", fault_code);
+ 	}
+ 
++	/* SWEET (R189): during proc-1 exec the kernel died with an L3
++	 * translation fault inside vm_object_range_op() with far landing in
++	 * the vm_page array region.  Before the panic wipes the evidence, say
++	 * who was walking pages (fp chain of the interrupted context) and
++	 * whether far really falls inside the vm_page array.  kprintf is safe
++	 * in this context (see R16 above); printf is not. */
++	{
++		uint64_t *sfp = (uint64_t *)(uintptr_t)get_saved_state_fp(state);
++		uint64_t sfar = (uint64_t)(uintptr_t)fault_addr;
++		uint64_t sabeg, saend;
++		extern void *vm_page_array_beginning_addr;
++		extern void *vm_page_array_ending_addr;
++		int sfi;
++
++		sabeg = (uint64_t)(uintptr_t)vm_page_array_beginning_addr;
++		saend = (uint64_t)(uintptr_t)vm_page_array_ending_addr;
++		kprintf("SWEET DABT: far %#llx esr %#llx array %#llx-%#llx "
++		    "in_array %d\n", sfar, esr, sabeg, saend,
++		    (int)(sfar >= sabeg && sfar < saend));
++		kprintf("SWEET DABT2: fp-chain");
++		for (sfi = 0; sfi < 10; sfi++) {
++			uint64_t sfpv = (uint64_t)(uintptr_t)sfp;
++			uint64_t *snfp;
++
++			if ((sfpv & 0x7) != 0 ||
++			    sfpv < 0xfffffe0000000000ULL ||
++			    sfpv >= 0xffffff0000000000ULL) {
++				break;
++			}
++			kprintf(" f%d %#llx", sfi, sfp[1]);
++			snfp = (uint64_t *)sfp[0];
++			if ((uint64_t)(uintptr_t)snfp <= sfpv) {
++				break;
++			}
++			sfp = snfp;
++		}
++		kprintf("\n");
++	}
++
+ 	panic_with_thread_kernel_state("Kernel data abort.", state);
+ }
+ 

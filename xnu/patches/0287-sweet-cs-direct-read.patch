@@ -1,0 +1,122 @@
+--- a/bsd/kern/mach_loader.c	2026-11-26 17:47:19.966231900 +0800
++++ b/bsd/kern/mach_loader.c	2026-11-26 17:49:34.285427700 +0800
+@@ -3522,6 +3522,77 @@
+ 	}
+ }
+ 
++/* SWEET (R189): direct block read of signature bytes for dyld/launchd.
++ * The UBC/cluster path has delivered all-zero pages for these reads since
++ * R19 (SWEET SIGRD shows "first 00000000" while the image holds fade0cc0
++ * at the same offset), so read the extent straight from the device instead:
++ * one VNOP_BLOCKMAP per 4 KiB piece (HFS extents are 4 KiB), the R187
++ * extent-table override for dyld, then the proven sweet_ufs_read_at().
++ * Returns 1 on success, 0 to fall back to vn_rdwr().
++ */
++static int
++sweet_sig_direct_read(
++	struct vnode    *vp,
++	off_t           at,
++	uint32_t        chunk,
++	vm_offset_t     dest)
++{
++	static char     sweet_sig_bounce[PAGE_SIZE / 4];
++	static boolean_t sweet_sig_busy = FALSE;
++	extern int      sweet_ufs_read_at(daddr64_t, uint32_t, void *);
++	extern daddr64_t sweet_dyld_bpn_for(uint64_t);
++	boolean_t       is_dyld;
++	uint32_t        got;
++	uintptr_t       ca;
++
++	if (sweet_sig_busy) {
++		return 0;
++	}
++	is_dyld = vp->v_name != NULL && strcmp(vp->v_name, "dyld") == 0;
++	sweet_sig_busy = TRUE;
++
++	for (got = 0; got < chunk; ) {
++		off_t           sat = at + got;
++		uint32_t        piece = (uint32_t)(PAGE_SIZE / 4 -
++		    (sat & (PAGE_SIZE / 4 - 1)));
++		daddr64_t       bpn = 0;
++		size_t          run = 0;
++		int             err;
++
++		if (piece > chunk - got) {
++			piece = chunk - got;
++		}
++		err = VNOP_BLOCKMAP(vp, sat, piece, &bpn, &run, NULL,
++		    VNODE_READ, vfs_context_current());
++		if (err == 0 && is_dyld) {
++			daddr64_t fix = sweet_dyld_bpn_for((uint64_t)sat);
++
++			if (fix >= 0) {
++				bpn = fix;
++			}
++		}
++		if (err != 0 || bpn < 0) {
++			sweet_sig_busy = FALSE;
++			return 0;
++		}
++		if (sweet_ufs_read_at(bpn, (uint32_t)piece,
++		    sweet_sig_bounce) != 0) {
++			sweet_sig_busy = FALSE;
++			return 0;
++		}
++		memcpy((void *)((uintptr_t)dest + got), sweet_sig_bounce, piece);
++		got += piece;
++	}
++	/* R42: the direct block read wrote through the kernel D-cache; clean
++	 * to the point of coherency so csblob parsing sees the bytes. */
++	for (ca = dest; ca < dest + chunk; ca += 64) {
++		__asm__ volatile("dc civac, %0" :: "r"(ca) : "memory");
++	}
++	__asm__ volatile("dsb sy" ::: "memory");
++	sweet_sig_busy = FALSE;
++	return 1;
++}
++
+ static load_return_t
+ load_code_signature(
+ 	struct linkedit_data_command    *lcp,
+@@ -3647,7 +3718,28 @@
+ 			chunk = to_page;
+ 		}
+ 		int part_resid = 0;
++		int direct = 0;
+ 
++		/* SWEET (R189): R19's page split did not stop the zero reads;
++		 * the cluster path still hands back zeros for dyld's and
++		 * launchd's signature blobs.  Take the proven direct block
++		 * read instead and only fall back to vn_rdwr when the extent
++		 * cannot be resolved from the device. */
++		if (vp->v_name != NULL &&
++		    (strcmp(vp->v_name, "dyld") == 0 ||
++		    strcmp(vp->v_name, "launchd") == 0)) {
++			direct = sweet_sig_direct_read(vp, at, chunk,
++			    (vm_offset_t)(addr + done));
++		}
++		if (direct) {
++			error = 0;
++			part_resid = 0;
++			printf("SWEET SIGRD2: %s direct chunk %u at %lld "
++			    "first %08x\n", vp->v_name, chunk, (long long)at,
++			    *(const uint32_t *)(uintptr_t)(addr + done));
++			done += chunk;
++			continue;
++		}
+ 		error = vn_rdwr(UIO_READ, vp, (caddr_t)addr + done, chunk, at,
+ 		    UIO_SYSSPACE, IO_NOCACHE, kauth_cred_get(), &part_resid,
+ 		    current_proc());
+--- a/bsd/kern/kern_exec.c	2026-11-26 17:47:20.027784200 +0800
++++ b/bsd/kern/kern_exec.c	2026-11-26 17:49:55.122207100 +0800
+@@ -8013,7 +8013,9 @@
+ #define SWEET_DYLD_BPN_N \
+ 	(sizeof(sweet_dyld_bpn_tbl) / sizeof(sweet_dyld_bpn_tbl[0]))
+ 
+-static daddr64_t
++/* SWEET (R189): no longer static -- load_code_signature() in mach_loader.c
++ * reuses the extent table for its direct signature reads. */
++daddr64_t
+ sweet_dyld_bpn_for(uint64_t foff)
+ {
+ 	uint32_t lo = 0, hi = (uint32_t)SWEET_DYLD_BPN_N;
