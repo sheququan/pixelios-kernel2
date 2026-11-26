@@ -68,8 +68,6 @@ int sweet_cache_map_count;
  * the SIGILL panic so a stray pc can be attributed to an image on screen. */
 uint64_t sweet_dyld_base;
 uint64_t sweet_main_base;
-uint64_t sweet_entry;
-uint32_t sweet_entry_word;
 
 static int
 sweet_cache_read(void *vp, uint64_t off, uint32_t len, void *dst)
@@ -254,7 +252,9 @@ s = s[:fn_match.start()] + helper + s[fn_match.start():]
 
 # ---------- 2) vm_unix.c : register every data mapping that has slide info ----------
 probe_match = re.search(
-    r"\tif \(error == 0 && \(p->p_flag & P_NOSHLIB\)\) \{", s)
+    r"\tif \(error == 0 && \(p->p_flag & P_NOSHLIB\)\) \{\r?\n"
+    r"\t\tOSBitAndAtomic\(~\(\(uint32_t\)P_NOSHLIB\), &p->p_flag\);\r?\n"
+    r"\t\}\r?\n", s)
 if probe_match is None:
     sys.exit("0278: probe anchor not found")
 
@@ -318,7 +318,7 @@ probe = r'''	/*
 		}
 	}
 '''
-s = s[:probe_match.start()] + probe + s[probe_match.start():]
+s = s[:probe_match.end()] + probe + s[probe_match.end():]
 
 with io.open(path, "w", encoding="utf-8", newline="") as f:
     f.write(s)
