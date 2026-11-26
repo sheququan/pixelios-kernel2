@@ -9,33 +9,27 @@
  		    thread_tid(current_thread()),
  		    (unsigned long long)get_saved_state_pc(state), esr,
  		    (unsigned)class, (unsigned long long)far);
-@@ -771,9 +771,26 @@
+@@ -771,9 +771,20 @@
  		if (is_user) {
  			uint32_t instr = 0;
-+			uint32_t callinstr = 0;
 +			extern uint64_t sweet_dyld_base, sweet_main_base;
  			COPYIN(get_saved_state_pc(state), (char *)&instr, sizeof(instr));
-+			/* SWEET (R177): F247 could not say which image owns pc.
-+			 * Print both load bases and the instruction before lr, so the
-+			 * owning image and the call site are both on screen at once. */
-+			if (get_saved_state_lr(state) > 4) {
-+				COPYIN(get_saved_state_lr(state) - 4, (char *)&callinstr,
-+				    sizeof(callinstr));
-+			}
 -			printf("SWEET SIGILL: pc %#llx instr %08x esr %#x far %#llx\n",
 -			    (unsigned long long)get_saved_state_pc(state), instr, esr,
 -			    (unsigned long long)far);
++			/* SWEET (R177): F247 could not say which image owns pc.
++			 * Print both load bases next to pc/lr; no extra COPYIN here,
++			 * a second user access in the exception path can wedge the
++			 * handler (R177 never reached a panic). */
 +			panic("SWEET SIGILL\n"
-+			    "pc %#llx in %08x\n"
-+			    "lr %#llx c %08x\n"
-+			    "db %#llx\n"
-+			    "mb %#llx\n"
-+			    "es %#x",
-+			    (unsigned long long)get_saved_state_pc(state), instr,
-+			    (unsigned long long)get_saved_state_lr(state), callinstr,
++			    "pc %#llx lr %#llx\n"
++			    "db %#llx mb %#llx\n"
++			    "in %08x es %#x",
++			    (unsigned long long)get_saved_state_pc(state),
++			    (unsigned long long)get_saved_state_lr(state),
 +			    (unsigned long long)sweet_dyld_base,
 +			    (unsigned long long)sweet_main_base,
-+			    esr);
++			    instr, esr);
  		}
  
  		handle_uncategorized(&context->ss);
