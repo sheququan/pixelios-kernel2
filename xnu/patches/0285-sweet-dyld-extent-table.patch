@@ -1,25 +1,24 @@
 --- a/bsd/kern/kern_exec.c
 +++ b/bsd/kern/kern_exec.c
-@@ -7778,6 +7778,271 @@
- 	extern errno_t VNOP_BLOCKMAP(vnode_t, off_t, size_t,
- 	    daddr64_t *, size_t *, void *, int, vfs_context_t);
- 	extern int sweet_ufs_read_at(daddr64_t, uint32_t, void *);
-+	/*
-+	 * SWEET (R187): F248/F262 -- /usr/lib/dyld is heavily fragmented in
-+	 * ios-root.img and HFS blockmap returns WRONG bpns for chunks that live
-+	 * outside the first extents (F139's "the disk really is zero at the bpn"
-+	 * was really "the disk holds another file's bytes at the bpn": ZCHUNK
-+	 * foff 0xe000/0x10000 resolved ~24k sectors low, into other files'
-+	 * bytes).  The fill installed the wrong bytes, __dyld_start branched to
-+	 * start at +0x13c00 and executed UDF -- the R185/R186 SIGILL.  The
-+	 * table below is the offline-verified placement: every 4 KiB chunk of
-+	 * dyld.bin located in the image by content hash; pure-zero padding
-+	 * chunks map to a verified zero block.  bpn values are kernel UFS bpns
-+	 * (image sector minus the partition start).  Cross-check: foff 0x14000
-+	 * -> bpn 12549336, exactly what HFS returns for the working entry
-+	 * page.
-+	 */
-+	static const struct { uint32_t foff; uint32_t bpn; } sweet_dyld_bpn_tbl[] = {
+@@ -7767,6 +7767,273 @@
+ 	}
+ }
+ 
++/*
++ * SWEET (R187): F248/F262 -- /usr/lib/dyld is heavily fragmented in
++ * ios-root.img and HFS blockmap returns WRONG bpns for chunks that live
++ * outside the first extents (F139's "the disk really is zero at the bpn"
++ * was really "the disk holds another file's bytes at the bpn": ZCHUNK
++ * foff 0xe000/0x10000 resolved ~24k sectors low, into other files' bytes).
++ * The fill installed the wrong bytes, __dyld_start branched to start at
++ * +0x13c00 and executed UDF -- the R185/R186 SIGILL.  The table below is
++ * the offline-verified placement: every 4 KiB chunk of dyld.bin located
++ * in the image by content hash; pure-zero padding chunks map to a
++ * verified zero block.  bpn values are kernel UFS bpns (image sector
++ * minus the partition start).  Cross-check: foff 0x14000 -> bpn
++ * 12549336, exactly what HFS returns for the working entry page.
++ */
++static const struct { uint32_t foff; uint32_t bpn; } sweet_dyld_bpn_tbl[] = {
 +	{ 0x0, 0xbf7a28 },
 +	{ 0x1000, 0xbf7a30 },
 +	{ 0x2000, 0xbf7a38 },
@@ -247,11 +246,14 @@
 +	{ 0xe0000, 0xbf82b0 },
 +	{ 0xe1000, 0xbf82b0 },
 +};
++
++#define SWEET_DYLD_BPN_N \
++	(sizeof(sweet_dyld_bpn_tbl) / sizeof(sweet_dyld_bpn_tbl[0]))
++
 +static daddr64_t
 +sweet_dyld_bpn_for(uint64_t foff)
 +{
-+	uint32_t lo = 0, hi = (uint32_t)
-+	    (sizeof(sweet_dyld_bpn_tbl) / sizeof(sweet_dyld_bpn_tbl[0]));
++	uint32_t lo = 0, hi = (uint32_t)SWEET_DYLD_BPN_N;
 +
 +	while (lo < hi) {
 +		uint32_t mid = lo + (hi - lo) / 2;
@@ -262,17 +264,17 @@
 +			hi = mid;
 +		}
 +	}
-+	if (lo >= (uint32_t)(sizeof(sweet_dyld_bpn_tbl) /
-+	    sizeof(sweet_dyld_bpn_tbl[0])) ||
++	if (lo >= (uint32_t)SWEET_DYLD_BPN_N ||
 +	    sweet_dyld_bpn_tbl[lo].foff != foff) {
 +		return -1;
 +	}
 +	return (daddr64_t)sweet_dyld_bpn_tbl[lo].bpn;
 +}
- 
- 	/*
- 	 * Prefault executable or dyld entry point.
-@@ -7977,6 +8242,26 @@
++
+ static void PREVENT_CALLER_STACK_USE
+ exec_prefault_data(proc_t p __unused, struct image_params *imgp, load_result_t *load_result)
+ {
+@@ -7977,6 +8244,26 @@
  								}
  								break;
  							}
@@ -281,25 +283,25 @@
 +							if (svp->v_name != NULL &&
 +							    strcmp(svp->v_name, "dyld") == 0) {
 +								daddr64_t fix =
-+								    sweet_dyld_bpn_for(
-+								    (uint64_t)(off + pos) +
-+								    (uint64_t)bi *
-+								    (PAGE_SIZE / 4));
++									sweet_dyld_bpn_for(
++									(uint64_t)(off + pos) +
++									(uint64_t)bi *
++									(PAGE_SIZE / 4));
 +
 +								if (fix >= 0 && fix != sub_bpn) {
 +									printf("SWEET BPNFIX: foff %#llx blk %#llx -> %#llx\n",
-+									    (unsigned long long)(off + pos) +
-+									    (unsigned long long)bi *
-+									    (PAGE_SIZE / 4),
-+									    (unsigned long long)sub_bpn,
-+									    (unsigned long long)fix);
++										(unsigned long long)(off + pos) +
++										(unsigned long long)bi *
++										(PAGE_SIZE / 4),
++										(unsigned long long)sub_bpn,
++										(unsigned long long)fix);
 +									sub_bpn = fix;
 +								}
 +							}
  							if (tr) {
  								printf("SWEET FT1%c%c: blk %#llx run %zu\n",
  								    pl, pm,
-@@ -8515,6 +8800,18 @@
+@@ -8515,6 +8802,18 @@
  				    (off_t)(fpage + bi * (PAGE_SIZE / 4)),
  				    PAGE_SIZE / 4, &sub_bpn, &sub_run, NULL,
  				    VNODE_READ, imgp->ip_vfs_context);
