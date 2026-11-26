@@ -1,0 +1,53 @@
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -951,26 +951,38 @@
+ 		/* SWEET (R74): only zero or failed direct reads matter;
+ 		 * healthy bytes were proven in R44/F112. */
+ 		if (error || (w[0] | w[1] | w[2] | w[3]) == 0) {
+-			/* SWEET (R77): F138 -- the UFS read path intermittently
+-			 * returns all-zero 4 KiB blocks whose on-disk content is
+-			 * real (ZCHUNK at dyld 0x37000/0x57000; SIGILL executes
+-			 * the zeros the fill wrote).  Prime suspect: completion
+-			 * reported before the data DMA lands.  Re-issue the same
+-			 * READ(10) immediately; if the data appears, use it. */
+ 			uint32_t w2[4] = { 0, 0, 0, 0 };
+-			int rerr = ufs_read_blocks(su.first_block + lba, blocks);
+-
+-			if (!rerr) {
+-				memcpy(w2, src, sizeof(w2));
++			int att, rerr = 0, got = 0;
++
++			for (att = 0; att < 8; att++) {
++				__asm__ volatile("dsb sy" ::: "memory");
++				delay(1);
++				__asm__ volatile("dsb sy" ::: "memory");
++				rerr = ufs_read_blocks(su.first_block + lba,
++				    blocks);
++				w2[0] = w2[1] = w2[2] = w2[3] = 0;
++				if (!rerr) {
++					memcpy(w2, src, sizeof(w2));
++				}
++				if ((w2[0] | w2[1] | w2[2] | w2[3]) != 0) {
++					got = 1;
++					break;
++				}
+ 			}
+ 			printf("SWEET ZRETRY: blk %lld unit %u lba %llu retry err %d w %08x -> %08x %08x %08x %08x\n",
+ 			    (long long)blkno, units[ui], (unsigned long long)lba,
+-			    rerr, w[0], w2[0], w2[1], w2[2], w2[3]);
+-			if (!rerr && (w2[0] | w2[1] | w2[2] | w2[3]) != 0) {
++			    att + 1, rerr, w[0], w2[0], w2[1], w2[2], w2[3]);
++			if (!rerr && got) {
+ 				memcpy(dst, src, want);
+ 				hit = ui;
+ 				break;
+ 			}
++			if (att >= 8) {
++				printf("SWEET ZFAIL: blk %lld unit %u lba %llu "
++				    "gave zeros after 8 retries\n",
++				    (long long)blkno, units[ui],
++				    (unsigned long long)lba);
++			}
+ 			printf("SWEET UFSREAD: unit %u lba %llu skip %u w %08x %08x %08x %08x\n",
+ 			    units[ui], (unsigned long long)lba, skip,
+ 			    w[0], w[1], w[2], w[3]);

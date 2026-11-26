@@ -1,6 +1,6 @@
 --- a/bsd/vm/vm_unix.c
 +++ b/bsd/vm/vm_unix.c
-@@ -2145,6 +2145,17 @@
+@@ -2145,6 +2145,19 @@
  			/* retrieve address of its first mapping... */
  			kr = vm_shared_region_start_address(shared_region, &start_address, task);
  			if (kr != KERN_SUCCESS) {
@@ -8,11 +8,13 @@
 +				 * map_with_linking_np, which never sets
 +				 * sr_first_mapping.  A later check_np then fails
 +				 * even though the cache is mapped in the task.
-+				 * Treat base+0 as the first mapping so dyld can
-+				 * continue. */
-+				shared_region->sr_first_mapping = 0;
-+				kr = vm_shared_region_start_address(shared_region,
-+				    &start_address, task);
++				 * Report the fixed shared-region base so dyld
++				 * can continue with its own mappings. */
++				start_address = 0x180000000ULL;
++				error = copyout(&start_address,
++				    (user_addr_t)uap->start_address,
++				    sizeof(start_address));
++				kr = (error == 0) ? KERN_SUCCESS : KERN_FAILURE;
 +			}
 +			if (kr != KERN_SUCCESS) {
  				/* SWEET (0247): say why the region is unusable instead of
