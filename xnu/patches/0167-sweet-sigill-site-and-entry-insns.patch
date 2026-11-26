@@ -45,12 +45,12 @@
 +			    "p %llx\n"
 +			    "l %llx\n"
 +			    "e %llx\n"
-+			    "w %08x",
++			    "i %08x",
 +			    sweet_k, (unsigned long long)sweet_off,
 +			    (unsigned long long)sweet_pc,
 +			    (unsigned long long)get_saved_state_lr(state),
 +			    (unsigned long long)sweet_entry,
-+			    sweet_entry_word);
++			    instr);
  		}
  
  		handle_uncategorized(&context->ss);
