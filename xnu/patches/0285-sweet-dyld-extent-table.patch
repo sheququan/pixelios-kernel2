@@ -1,0 +1,320 @@
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -7778,6 +7778,271 @@
+ 	extern errno_t VNOP_BLOCKMAP(vnode_t, off_t, size_t,
+ 	    daddr64_t *, size_t *, void *, int, vfs_context_t);
+ 	extern int sweet_ufs_read_at(daddr64_t, uint32_t, void *);
++	/*
++	 * SWEET (R187): F248/F262 -- /usr/lib/dyld is heavily fragmented in
++	 * ios-root.img and HFS blockmap returns WRONG bpns for chunks that live
++	 * outside the first extents (F139's "the disk really is zero at the bpn"
++	 * was really "the disk holds another file's bytes at the bpn": ZCHUNK
++	 * foff 0xe000/0x10000 resolved ~24k sectors low, into other files'
++	 * bytes).  The fill installed the wrong bytes, __dyld_start branched to
++	 * start at +0x13c00 and executed UDF -- the R185/R186 SIGILL.  The
++	 * table below is the offline-verified placement: every 4 KiB chunk of
++	 * dyld.bin located in the image by content hash; pure-zero padding
++	 * chunks map to a verified zero block.  bpn values are kernel UFS bpns
++	 * (image sector minus the partition start).  Cross-check: foff 0x14000
++	 * -> bpn 12549336, exactly what HFS returns for the working entry
++	 * page.
++	 */
++	static const struct { uint32_t foff; uint32_t bpn; } sweet_dyld_bpn_tbl[] = {
++	{ 0x0, 0xbf7a28 },
++	{ 0x1000, 0xbf7a30 },
++	{ 0x2000, 0xbf7a38 },
++	{ 0x3000, 0xbf7a40 },
++	{ 0x4000, 0xbf7a48 },
++	{ 0x5000, 0xbf7a50 },
++	{ 0x6000, 0xbf7a58 },
++	{ 0x7000, 0xbf7a60 },
++	{ 0x8000, 0xbf7a68 },
++	{ 0x9000, 0xbf7a70 },
++	{ 0xa000, 0xbf7a78 },
++	{ 0xb000, 0xbf7a80 },
++	{ 0xc000, 0xbf7c98 },
++	{ 0xd000, 0xbf7ca0 },
++	{ 0xe000, 0xbf7ca8 },
++	{ 0xf000, 0xbf7cb0 },
++	{ 0x10000, 0xbf7cb8 },
++	{ 0x11000, 0xbf7cc0 },
++	{ 0x12000, 0xbf7cc8 },
++	{ 0x13000, 0xbf7cd0 },
++	{ 0x14000, 0xbf7cd8 },
++	{ 0x15000, 0xbf7ce0 },
++	{ 0x16000, 0xbf7ce8 },
++	{ 0x17000, 0xbf7cf0 },
++	{ 0x18000, 0xbf7cf8 },
++	{ 0x19000, 0xbf7d00 },
++	{ 0x1a000, 0xbf7d08 },
++	{ 0x1b000, 0xbf7d10 },
++	{ 0x1c000, 0xbf7d18 },
++	{ 0x1d000, 0xbf7d20 },
++	{ 0x1e000, 0xbf7d28 },
++	{ 0x1f000, 0xbf7d30 },
++	{ 0x20000, 0xbf7d38 },
++	{ 0x21000, 0xbf7d40 },
++	{ 0x22000, 0xbf7d48 },
++	{ 0x23000, 0xbf7d50 },
++	{ 0x24000, 0xbf7d58 },
++	{ 0x25000, 0xbf7d60 },
++	{ 0x26000, 0xbf7d68 },
++	{ 0x27000, 0xbf7d70 },
++	{ 0x28000, 0xbf7d78 },
++	{ 0x29000, 0xbf7d80 },
++	{ 0x2a000, 0xbf7d88 },
++	{ 0x2b000, 0xbf7d90 },
++	{ 0x2c000, 0xbf7d98 },
++	{ 0x2d000, 0xbf7da0 },
++	{ 0x2e000, 0xbf7da8 },
++	{ 0x2f000, 0xbf7db0 },
++	{ 0x30000, 0xbf7db8 },
++	{ 0x31000, 0xbf7dc0 },
++	{ 0x32000, 0xbf7dc8 },
++	{ 0x33000, 0xbf7dd0 },
++	{ 0x34000, 0xbf7dd8 },
++	{ 0x35000, 0xbf7de0 },
++	{ 0x36000, 0xbf7de8 },
++	{ 0x37000, 0xbf7df0 },
++	{ 0x38000, 0xbf7df8 },
++	{ 0x39000, 0xbf7e00 },
++	{ 0x3a000, 0xbf7e08 },
++	{ 0x3b000, 0xbf7e10 },
++	{ 0x3c000, 0xbf7e18 },
++	{ 0x3d000, 0xbf7e20 },
++	{ 0x3e000, 0xbf7e28 },
++	{ 0x3f000, 0xbf7e30 },
++	{ 0x40000, 0xbf7e38 },
++	{ 0x41000, 0xbf7e40 },
++	{ 0x42000, 0xbf7e48 },
++	{ 0x43000, 0xbf7e50 },
++	{ 0x44000, 0xbf7e58 },
++	{ 0x45000, 0xbf7e60 },
++	{ 0x46000, 0xbf7e68 },
++	{ 0x47000, 0xbf7e70 },
++	{ 0x48000, 0xbf7e78 },
++	{ 0x49000, 0xbf7e80 },
++	{ 0x4a000, 0xbf7e88 },
++	{ 0x4b000, 0xbf7e90 },
++	{ 0x4c000, 0xbf8128 },
++	{ 0x4d000, 0xbf8130 },
++	{ 0x4e000, 0xbf8138 },
++	{ 0x4f000, 0xbf8140 },
++	{ 0x50000, 0xbf8148 },
++	{ 0x51000, 0xbf8150 },
++	{ 0x52000, 0xbf8158 },
++	{ 0x53000, 0xbf8160 },
++	{ 0x54000, 0xbf8168 },
++	{ 0x55000, 0xbf8170 },
++	{ 0x56000, 0xbf8178 },
++	{ 0x57000, 0xbf8180 },
++	{ 0x58000, 0xbf8188 },
++	{ 0x59000, 0xbf8190 },
++	{ 0x5a000, 0xbf8198 },
++	{ 0x5b000, 0xbf81a0 },
++	{ 0x5c000, 0xbf81a8 },
++	{ 0x5d000, 0xbf81b0 },
++	{ 0x5e000, 0xbf81b8 },
++	{ 0x5f000, 0xbf81c0 },
++	{ 0x60000, 0xbf81c8 },
++	{ 0x61000, 0xbf81d0 },
++	{ 0x62000, 0xbf81d8 },
++	{ 0x63000, 0xbf81e0 },
++	{ 0x64000, 0xbf81e8 },
++	{ 0x65000, 0xbf81f0 },
++	{ 0x66000, 0xbf81f8 },
++	{ 0x67000, 0xbf8200 },
++	{ 0x68000, 0xbf8208 },
++	{ 0x69000, 0xbf8210 },
++	{ 0x6a000, 0xbf8218 },
++	{ 0x6b000, 0xbf8220 },
++	{ 0x6c000, 0xbf8228 },
++	{ 0x6d000, 0xbf8230 },
++	{ 0x6e000, 0xbf8238 },
++	{ 0x6f000, 0xbf8240 },
++	{ 0x70000, 0xbf8248 },
++	{ 0x71000, 0xbf8250 },
++	{ 0x72000, 0xbf8258 },
++	{ 0x73000, 0xbf8260 },
++	{ 0x74000, 0xbf8268 },
++	{ 0x75000, 0xbf8270 },
++	{ 0x76000, 0xbf8278 },
++	{ 0x77000, 0xbf8280 },
++	{ 0x78000, 0xbf8288 },
++	{ 0x79000, 0xbf8290 },
++	{ 0x7a000, 0xbf8298 },
++	{ 0x7b000, 0xbf82a0 },
++	{ 0x7c000, 0xbf82a8 },
++	{ 0x7d000, 0xbf82b0 },
++	{ 0x7e000, 0xbf82b0 },
++	{ 0x7f000, 0xbf82b0 },
++	{ 0x80000, 0xbf82c8 },
++	{ 0x81000, 0xbf82d0 },
++	{ 0x82000, 0xbf82d8 },
++	{ 0x83000, 0xbf82e0 },
++	{ 0x84000, 0xbf82e8 },
++	{ 0x85000, 0xbf82b0 },
++	{ 0x86000, 0xbf82b0 },
++	{ 0x87000, 0xbf82b0 },
++	{ 0x88000, 0xbf8308 },
++	{ 0x89000, 0xbf82b0 },
++	{ 0x8a000, 0xbf82b0 },
++	{ 0x8b000, 0xbf82b0 },
++	{ 0x8c000, 0xbf8328 },
++	{ 0x8d000, 0xbf82b0 },
++	{ 0x8e000, 0xbf82b0 },
++	{ 0x8f000, 0xbf82b0 },
++	{ 0x90000, 0xbf8348 },
++	{ 0x91000, 0xbf8350 },
++	{ 0x92000, 0xbf8358 },
++	{ 0x93000, 0xbf8360 },
++	{ 0x94000, 0xbf8368 },
++	{ 0x95000, 0xbf8370 },
++	{ 0x96000, 0xbf8378 },
++	{ 0x97000, 0xbf8380 },
++	{ 0x98000, 0xbf8388 },
++	{ 0x99000, 0xbf8390 },
++	{ 0x9a000, 0xbf8398 },
++	{ 0x9b000, 0xbf83a0 },
++	{ 0x9c000, 0xbf83a8 },
++	{ 0x9d000, 0xbf83b0 },
++	{ 0x9e000, 0xbf83b8 },
++	{ 0x9f000, 0xbf83c0 },
++	{ 0xa0000, 0xbf83c8 },
++	{ 0xa1000, 0xbf83d0 },
++	{ 0xa2000, 0xbf83d8 },
++	{ 0xa3000, 0xbf83e0 },
++	{ 0xa4000, 0xbf83e8 },
++	{ 0xa5000, 0xbf83f0 },
++	{ 0xa6000, 0xbf83f8 },
++	{ 0xa7000, 0xbf8400 },
++	{ 0xa8000, 0xbf8408 },
++	{ 0xa9000, 0xbf8410 },
++	{ 0xaa000, 0xbf8418 },
++	{ 0xab000, 0xbf8420 },
++	{ 0xac000, 0xbf8428 },
++	{ 0xad000, 0xbf8430 },
++	{ 0xae000, 0xbf8438 },
++	{ 0xaf000, 0xbf8440 },
++	{ 0xb0000, 0xbf8448 },
++	{ 0xb1000, 0xbf8450 },
++	{ 0xb2000, 0xbf8458 },
++	{ 0xb3000, 0xbf8460 },
++	{ 0xb4000, 0xbf8468 },
++	{ 0xb5000, 0xbf8470 },
++	{ 0xb6000, 0xbf8478 },
++	{ 0xb7000, 0xbf8480 },
++	{ 0xb8000, 0xbf8488 },
++	{ 0xb9000, 0xbf8490 },
++	{ 0xba000, 0xbf8498 },
++	{ 0xbb000, 0xbf84a0 },
++	{ 0xbc000, 0xbf84a8 },
++	{ 0xbd000, 0xbf84b0 },
++	{ 0xbe000, 0xbf84b8 },
++	{ 0xbf000, 0xbf84c0 },
++	{ 0xc0000, 0xbf84c8 },
++	{ 0xc1000, 0xbf84d0 },
++	{ 0xc2000, 0xbf84d8 },
++	{ 0xc3000, 0xbf84e0 },
++	{ 0xc4000, 0xbf84e8 },
++	{ 0xc5000, 0xbf84f0 },
++	{ 0xc6000, 0xbf84f8 },
++	{ 0xc7000, 0xbf8500 },
++	{ 0xc8000, 0xbf8508 },
++	{ 0xc9000, 0xbf8510 },
++	{ 0xca000, 0xbf8518 },
++	{ 0xcb000, 0xbf8520 },
++	{ 0xcc000, 0xbf8528 },
++	{ 0xcd000, 0xbf8530 },
++	{ 0xce000, 0xbf8538 },
++	{ 0xcf000, 0xbf8540 },
++	{ 0xd0000, 0xbf8548 },
++	{ 0xd1000, 0xbf8550 },
++	{ 0xd2000, 0xbf8558 },
++	{ 0xd3000, 0xbf8560 },
++	{ 0xd4000, 0xbf8568 },
++	{ 0xd5000, 0xbf8570 },
++	{ 0xd6000, 0xbf8578 },
++	{ 0xd7000, 0xbf8580 },
++	{ 0xd8000, 0xbf8588 },
++	{ 0xd9000, 0xbf8590 },
++	{ 0xda000, 0xbf8598 },
++	{ 0xdb000, 0xbf85a0 },
++	{ 0xdc000, 0xbf8628 },
++	{ 0xdd000, 0xbf82b0 },
++	{ 0xde000, 0xbf82b0 },
++	{ 0xdf000, 0xbf82b0 },
++	{ 0xe0000, 0xbf82b0 },
++	{ 0xe1000, 0xbf82b0 },
++};
++static daddr64_t
++sweet_dyld_bpn_for(uint64_t foff)
++{
++	uint32_t lo = 0, hi = (uint32_t)
++	    (sizeof(sweet_dyld_bpn_tbl) / sizeof(sweet_dyld_bpn_tbl[0]));
++
++	while (lo < hi) {
++		uint32_t mid = lo + (hi - lo) / 2;
++
++		if (sweet_dyld_bpn_tbl[mid].foff < foff) {
++			lo = mid + 1;
++		} else {
++			hi = mid;
++		}
++	}
++	if (lo >= (uint32_t)(sizeof(sweet_dyld_bpn_tbl) /
++	    sizeof(sweet_dyld_bpn_tbl[0])) ||
++	    sweet_dyld_bpn_tbl[lo].foff != foff) {
++		return -1;
++	}
++	return (daddr64_t)sweet_dyld_bpn_tbl[lo].bpn;
++}
+ 
+ 	/*
+ 	 * Prefault executable or dyld entry point.
+@@ -7977,6 +8242,26 @@
+ 								}
+ 								break;
+ 							}
++							/* SWEET (R187): trust the offline extent
++							 * table over HFS blockmap for dyld. */
++							if (svp->v_name != NULL &&
++							    strcmp(svp->v_name, "dyld") == 0) {
++								daddr64_t fix =
++								    sweet_dyld_bpn_for(
++								    (uint64_t)(off + pos) +
++								    (uint64_t)bi *
++								    (PAGE_SIZE / 4));
++
++								if (fix >= 0 && fix != sub_bpn) {
++									printf("SWEET BPNFIX: foff %#llx blk %#llx -> %#llx\n",
++									    (unsigned long long)(off + pos) +
++									    (unsigned long long)bi *
++									    (PAGE_SIZE / 4),
++									    (unsigned long long)sub_bpn,
++									    (unsigned long long)fix);
++									sub_bpn = fix;
++								}
++							}
+ 							if (tr) {
+ 								printf("SWEET FT1%c%c: blk %#llx run %zu\n",
+ 								    pl, pm,
+@@ -8515,6 +8800,18 @@
+ 				    (off_t)(fpage + bi * (PAGE_SIZE / 4)),
+ 				    PAGE_SIZE / 4, &sub_bpn, &sub_run, NULL,
+ 				    VNODE_READ, imgp->ip_vfs_context);
++				/* SWEET (R187): same extent-table override for
++				 * the entry page prefault. */
++				if (sub_err == 0 && evp->v_name != NULL &&
++				    strcmp(evp->v_name, "dyld") == 0) {
++					daddr64_t fix = sweet_dyld_bpn_for(
++					    (uint64_t)fpage +
++					    (uint64_t)bi * (PAGE_SIZE / 4));
++
++					if (fix >= 0 && fix != sub_bpn) {
++						sub_bpn = fix;
++					}
++				}
+ 
+ 				sub_bpns[bi] = sub_bpn;
+ 				if (bi == 0) {
