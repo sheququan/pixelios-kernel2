@@ -274,10 +274,24 @@
  static void PREVENT_CALLER_STACK_USE
  exec_prefault_data(proc_t p __unused, struct image_params *imgp, load_result_t *load_result)
  {
-@@ -7977,6 +8244,26 @@
+@@ -7977,6 +8244,40 @@
  								}
  								break;
  							}
++							{
++								static int sg_done[32];
++								if (si < 32 && !sg_done[si]) {
++									sg_done[si] = 1;
++									printf("SWEET SEGD: si %d v %s va %#llx off %#llx len %#llx cnt %d\n",
++									    si,
++									    svp->v_name != NULL ? svp->v_name : "(null)",
++									    (unsigned long long)va,
++									    (unsigned long long)off,
++									    (unsigned long long)left,
++									    sweet_seg_count);
++								}
++							}
++
 +							/* SWEET (R187): trust the offline extent
 +							 * table over HFS blockmap for dyld. */
 +							if (svp->v_name != NULL &&
