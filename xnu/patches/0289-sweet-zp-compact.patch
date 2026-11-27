@@ -1,0 +1,35 @@
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -900,9 +900,27 @@
+ 						fpw1 = ml_phys_read_word_64(sfpa + 4);
+ 					}
+ 				}
+-				panic("SWEET SIGILL2: pa %#llx pgw %08x %08x ew %08x %08x fillpa %#llx fillw %08x %08x fillidx %d pc %#llx instr %08x esr %#x ec %u far %#llx\n%s",
+-				    spgpa, pgw0, pgw1, ew0, ew1, sfpa, fpw0, fpw1,
+-				    sfd, (unsigned long long)get_saved_state_pc(state),
+-				    instr, esr, (unsigned)class, (unsigned long long)far,
+-				    sweet_zpage);
++				{
++					extern int sweet_seg_count;
++					extern uint64_t sweet_seg_va[], sweet_seg_off[];
++					char sectbuf[192];
++					int sl = 0, sdi;
++
++					for (sdi = 0; sdi < sweet_seg_count && sdi < 5; sdi++) {
++						sl += snprintf(sectbuf + sl,
++						    sizeof(sectbuf) - (size_t)sl,
++						    "S%d %llx/%llx\n", sdi,
++						    (unsigned long long)sweet_seg_va[sdi],
++						    (unsigned long long)sweet_seg_off[sdi]);
++					}
++					if (sl <= 0) {
++						snprintf(sectbuf, sizeof(sectbuf), "none\n");
++					}
++					panic("SWEET ZP pc %llx pa %llx\nSWEET ZW pg %x %x ew %x %x\nSWEET ZF va %llx fp %llx fw %x %x i %d\nSWEET SEG n%d %s%s",
++					    (unsigned long long)get_saved_state_pc(state), spgpa,
++					    pgw0, pgw1, ew0, ew1,
++					    (unsigned long long)(sfd >= 0 ? sweet_wr_va[sfd] : 0ULL),
++					    sfpa, fpw0, fpw1, sfd, sweet_seg_count,
++					    sectbuf, sweet_zpage);
++				}
+ 			}
