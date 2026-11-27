@@ -1,0 +1,20 @@
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -905,5 +905,17 @@
+ 				    sweet_zpage);
+ 			}
+ 		}
+ 
++		/* SWEET (R218b): log the first non-SIGILL user exceptions, unmuted. */
++		{
++			extern int sweet_console_muted;
++			static int sweet_oex_n = 0;
++			if (sweet_oex_n < 8) {
++				sweet_oex_n++;
++				sweet_console_muted = 0;
++				kprintf("SWEET OEXC: pc %#llx class %u far %#llx\n",
++				    (unsigned long long)get_saved_state_pc(state),
++				    (unsigned)class, (unsigned long long)far);
++			}
++		}
+ 		handle_uncategorized(&context->ss);
