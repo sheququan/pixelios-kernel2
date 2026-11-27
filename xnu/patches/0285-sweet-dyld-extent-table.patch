@@ -1,6 +1,6 @@
 --- a/bsd/kern/kern_exec.c
 +++ b/bsd/kern/kern_exec.c
-@@ -7767,6 +7767,273 @@
+@@ -7767,6 +7767,277 @@
  	}
  }
  
@@ -254,6 +254,10 @@
 +sweet_dyld_bpn_for(uint64_t foff)
 +{
 +	uint32_t lo = 0, hi = (uint32_t)SWEET_DYLD_BPN_N;
++
++	if (foff < 0x2000) {
++		printf("SWEET LOOK: foff %#llx\n", (unsigned long long)foff);
++	}
 +
 +	while (lo < hi) {
 +		uint32_t mid = lo + (hi - lo) / 2;
