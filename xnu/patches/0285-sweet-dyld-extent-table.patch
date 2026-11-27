@@ -301,7 +301,7 @@
  							if (tr) {
  								printf("SWEET FT1%c%c: blk %#llx run %zu\n",
  								    pl, pm,
-@@ -8515,6 +8802,18 @@
+@@ -8515,6 +8802,42 @@
  				    (off_t)(fpage + bi * (PAGE_SIZE / 4)),
  				    PAGE_SIZE / 4, &sub_bpn, &sub_run, NULL,
  				    VNODE_READ, imgp->ip_vfs_context);
@@ -316,6 +316,30 @@
 +					if (fix >= 0 && fix != sub_bpn) {
 +						sub_bpn = fix;
 +					}
++				}
++
++				/* SWEET (R211): dyld foff 0 (Mach-O header) is NOT covered
++				 * by the segment fill loop (which starts at foff 0x10000).
++				 * HFS resolves foff 0 to a wrong extent (0xbc3630), so the
++				 * CPU executes another file's bytes at dyld+0x3090.
++				 * Force-read the header page from the verified table. */
++				if (bi == 0 && sub_err == 0 && evp != NULL &&
++				    evp->v_name != NULL && strcmp(evp->v_name, "dyld") == 0 &&
++				    seg >= 0) {
++					extern uint64_t sweet_seg_va[], sweet_seg_off[];
++					uint64_t dbase = sweet_seg_va[seg] - sweet_seg_off[seg];
++					static char hdrbuf[PAGE_SIZE] __attribute__((aligned(PAGE_SIZE)));
++					int dbi;
++					for (dbi = 0; dbi < 4; dbi++) {
++						daddr64_t fb = sweet_dyld_bpn_for((uint64_t)dbi * (PAGE_SIZE / 4));
++						if (fb >= 0) {
++							sweet_ufs_read_at(fb, (uint32_t)(PAGE_SIZE / 4),
++							    hdrbuf + dbi * (PAGE_SIZE / 4));
++						}
++					}
++					copyout(hdrbuf, (user_addr_t)(uintptr_t)dbase, PAGE_SIZE);
++					printf("SWEET HDRFIX: seg %d base %#llx\n", seg,
++					    (unsigned long long)dbase);
 +				}
  
  				sub_bpns[bi] = sub_bpn;
