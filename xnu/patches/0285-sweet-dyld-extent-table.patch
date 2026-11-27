@@ -274,27 +274,38 @@
  static void PREVENT_CALLER_STACK_USE
  exec_prefault_data(proc_t p __unused, struct image_params *imgp, load_result_t *load_result)
  {
-@@ -7977,6 +8244,26 @@
+@@ -7977,6 +8244,37 @@
  								}
  								break;
  							}
 +							/* SWEET (R187): trust the offline extent
 +							 * table over HFS blockmap for dyld. */
 +							if (svp->v_name != NULL &&
-+							    strcmp(svp->v_name, "dyld") == 0) {
++							    strnstr(svp->v_name, "dyld", 64) != NULL) {
 +								daddr64_t fix =
 +									sweet_dyld_bpn_for(
 +									(uint64_t)(off + pos) +
 +									(uint64_t)bi *
 +									(PAGE_SIZE / 4));
 +
++								{
++									static int lookn = 0;
++									if (fix >= 0 && (fix != sub_bpn || lookn < 40)) {
++										printf("SWEET LK foff %#llx blk %#llx fix %#llx\n",
++										    (unsigned long long)(off + pos) +
++										    (unsigned long long)bi * (PAGE_SIZE / 4),
++										    (unsigned long long)sub_bpn,
++										    (unsigned long long)fix);
++										lookn++;
++									}
++								}
 +								if (fix >= 0 && fix != sub_bpn) {
-+									printf("SWEET BPNFIX: foff %#llx blk %#llx -> %#llx\n",
++									printf("SWEET BPNFIX: foff %#llx blk %#llx -> %#llx v %s\n",
 +										(unsigned long long)(off + pos) +
 +										(unsigned long long)bi *
 +										(PAGE_SIZE / 4),
 +										(unsigned long long)sub_bpn,
-+										(unsigned long long)fix);
++										(unsigned long long)fix, svp->v_name);
 +									sub_bpn = fix;
 +								}
 +							}
@@ -308,7 +319,7 @@
 +				/* SWEET (R187): same extent-table override for
 +				 * the entry page prefault. */
 +				if (sub_err == 0 && evp->v_name != NULL &&
-+				    strcmp(evp->v_name, "dyld") == 0) {
++				    strnstr(evp->v_name, "dyld", 64) != NULL) {
 +					daddr64_t fix = sweet_dyld_bpn_for(
 +					    (uint64_t)fpage +
 +					    (uint64_t)bi * (PAGE_SIZE / 4));
