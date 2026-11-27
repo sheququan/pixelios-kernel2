@@ -274,14 +274,20 @@
  static void PREVENT_CALLER_STACK_USE
  exec_prefault_data(proc_t p __unused, struct image_params *imgp, load_result_t *load_result)
  {
-@@ -7977,6 +8244,26 @@
+@@ -7977,6 +8244,32 @@
  								}
  								break;
  							}
 +							/* SWEET (R187): trust the offline extent
 +							 * table over HFS blockmap for dyld. */
++							/* SWEET (R218): the table below was built from the OLD
++							 * rootfs whose dyld is 0xE1520 bytes.  The rebuilt rootfs
++							 * ships a different dyld (0x7FAA0) whose blocks HFS maps
++							 * correctly; applying the stale table there corrupts a
++							 * working mapping.  Gate on the file size we know. */
 +							if (svp->v_name != NULL &&
-+							    strcmp(svp->v_name, "dyld") == 0) {
++							    strcmp(svp->v_name, "dyld") == 0 &&
++							    ubc_getsize(svp) == 0xE1520) {
 +								daddr64_t fix =
 +									sweet_dyld_bpn_for(
 +									(uint64_t)(off + pos) +
@@ -301,14 +307,15 @@
  							if (tr) {
  								printf("SWEET FT1%c%c: blk %#llx run %zu\n",
  								    pl, pm,
-@@ -8515,6 +8802,18 @@
+@@ -8515,6 +8808,19 @@
  				    (off_t)(fpage + bi * (PAGE_SIZE / 4)),
  				    PAGE_SIZE / 4, &sub_bpn, &sub_run, NULL,
  				    VNODE_READ, imgp->ip_vfs_context);
 +				/* SWEET (R187): same extent-table override for
 +				 * the entry page prefault. */
 +				if (sub_err == 0 && evp->v_name != NULL &&
-+				    strcmp(evp->v_name, "dyld") == 0) {
++				    strcmp(evp->v_name, "dyld") == 0 &&
++				    ubc_getsize(evp) == 0xE1520) {
 +					daddr64_t fix = sweet_dyld_bpn_for(
 +					    (uint64_t)fpage +
 +					    (uint64_t)bi * (PAGE_SIZE / 4));
