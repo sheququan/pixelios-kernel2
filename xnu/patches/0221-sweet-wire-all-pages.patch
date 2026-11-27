@@ -23,7 +23,7 @@
  			for (si = 0; si < sweet_seg_count && si < 32; si++) {
  				struct vnode *svp = sweet_seg_vp[si];
  				uint64_t va = sweet_seg_va[si];
-@@ -7988,6 +8002,73 @@
+@@ -7988,6 +8002,86 @@
  							__asm__ volatile("dsb sy" ::: "memory");
  						}
  					}
@@ -90,6 +90,19 @@
 +								printf("SWEET WIRE81: cur va %#llx pn 0x%x kr %d\n",
 +								    (unsigned long long)(va + pos),
 +								    (unsigned)pn81, (int)pkr81);
++							}
++							{
++								extern ppnum_t pmap_find_phys(pmap_t, addr64_t);
++								extern uint64_t phystokv(uint64_t);
++								ppnum_t ck81 = pmap_find_phys(sweet_cur_pm,
++								    (addr64_t)(va + pos));
++								if (sweet_fill_idx < 6) {
++									printf("SWEET W81C: va %#llx pn %#x ck %#x buf %08x dr %08x\n",
++									    (unsigned long long)(va + pos),
++									    (unsigned)pn81, (unsigned)ck81,
++									    *(unsigned int *)(void *)fp81,
++									    ck81 ? *(unsigned int *)(void *)phystokv(ptoa(ck81)) : 0);
++								}
 +							}
 +							sweet_fill_idx++;
 +						}
