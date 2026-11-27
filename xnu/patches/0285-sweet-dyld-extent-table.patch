@@ -1,6 +1,6 @@
 --- a/bsd/kern/kern_exec.c
 +++ b/bsd/kern/kern_exec.c
-@@ -7767,6 +7767,273 @@
+@@ -7767,6 +7767,281 @@
  	}
  }
  
@@ -254,6 +254,14 @@
 +sweet_dyld_bpn_for(uint64_t foff)
 +{
 +	uint32_t lo = 0, hi = (uint32_t)SWEET_DYLD_BPN_N;
++
++	/* SWEET (R217): experiment -- the table was built from the OLD
++	 * ios-root.img (dyld 0xE1520).  The device now runs a rebuilt
++	 * rootfs whose dyld is 0x7FAA0, so table bpns may name the wrong
++	 * blocks.  Return -1 so every call site falls back to the HFS
++	 * blockmap answer and we learn whether HFS is trustworthy on the
++	 * new root. */
++	return -1;
 +
 +	while (lo < hi) {
 +		uint32_t mid = lo + (hi - lo) / 2;
