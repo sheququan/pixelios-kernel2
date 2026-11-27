@@ -274,10 +274,16 @@
  static void PREVENT_CALLER_STACK_USE
  exec_prefault_data(proc_t p __unused, struct image_params *imgp, load_result_t *load_result)
  {
-@@ -7977,6 +8244,26 @@
+@@ -7977,6 +8244,32 @@
  								}
  								break;
  							}
++							if (bi == 0 && off + pos < 0x2000) {
++								printf("SWEET SG: v %s off %#llx bpn %#llx\n",
++								    svp->v_name != NULL ? svp->v_name : "(null)",
++								    (unsigned long long)(off + pos),
++								    (unsigned long long)sub_bpn);
++							}
 +							/* SWEET (R187): trust the offline extent
 +							 * table over HFS blockmap for dyld. */
 +							if (svp->v_name != NULL &&
