@@ -1,6 +1,6 @@
 --- a/bsd/kern/kern_exec.c
 +++ b/bsd/kern/kern_exec.c
-@@ -7767,6 +7767,273 @@
+@@ -7767,6 +7767,283 @@
  	}
  }
  
@@ -254,6 +254,16 @@
 +sweet_dyld_bpn_for(uint64_t foff)
 +{
 +	uint32_t lo = 0, hi = (uint32_t)SWEET_DYLD_BPN_N;
++
++	/* SWEET (R219): measured, not guessed.  With this table enabled the
++	 * dyld fill reports BPNFIX lines and the CPU still executes garbage
++	 * at dyld+0x3090; with it disabled the very same kernel reports
++	 * `FILLPAGE: segs 9 blocks 91 rd_bad 0 co_bad 0` and `SEGREAD: w
++	 * feedfacf`, and the SIGILL disappears.  The table encodes the block
++	 * placement of an older rootfs image; the rootfs this device runs was
++	 * rebuilt from the IPSW dmgs, so its HFS extents are authoritative.
++	 * Keep the table code for reference but never consult it. */
++	return -1;
 +
 +	while (lo < hi) {
 +		uint32_t mid = lo + (hi - lo) / 2;

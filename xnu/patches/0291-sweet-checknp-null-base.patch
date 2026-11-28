@@ -1,0 +1,16 @@
+--- a/bsd/vm/vm_unix.c
++++ b/bsd/vm/vm_unix.c
+@@ -2145,3 +2145,13 @@
+ 			/* retrieve address of its first mapping... */
+ 			kr = vm_shared_region_start_address(shared_region, &start_address, task);
++			/* SWEET (R224): confirm the call actually reaches here and what
++			 * the region lookup returned, before deciding the return code. */
++			printf("SWEET CHKNP: kr %d start %#llx\n", (int)kr,
++			    (unsigned long long)start_address);
++			/* SWEET (R222): dyld dereferences whatever base we hand back
++			 * (+0x1f0) and the cache is not mapped there.  Report ESRCH so
++			 * dyld falls back to loading dylibs from the rootfs. */
++			if (kr == KERN_SUCCESS) {
++				return ESRCH;
++			}
+ 			if (kr != KERN_SUCCESS) {

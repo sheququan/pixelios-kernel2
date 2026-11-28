@@ -71,6 +71,46 @@ jobs:
           sudo xcode-select -s "$XC"
           xcodebuild -version
 
+      - name: Locate sweet_ufs strategy line (diagnostic)
+        run: |
+          # Apply the patch series to a throwaway copy so the real build is
+          # untouched, then report the line numbers we need to write a
+          # late-numbered patch that inserts into sweet_ufs_strategy().
+          rm -rf /tmp/dxbdump
+          cp -R dxb /tmp/dxbdump
+          cd /tmp/dxbdump
+          # The XNU tree lives in dxb/xnu; stage scripts and patches both run
+          # with that as the working directory (see the compiler paths).
+          [ -d xnu ] && cd xnu
+          # Stage scripts run BEFORE patches in the real build, and HFS only
+          # exists after 0026-stage-hfs.sh, so run them here too.
+          for s in patches/*.sh; do
+            bash "$s" >/dev/null 2>&1 || true
+          done
+          # The tree layout differs between dxb revisions; try the usual
+          # strip levels and ignore files that are not present yet.
+          for p in patches/*.patch; do
+            patch -p1 --forward -i "$p" >/dev/null 2>&1 \
+              || patch -p2 --forward -i "$p" >/dev/null 2>&1 \
+              || patch -p0 --forward -i "$p" >/dev/null 2>&1 || true
+          done
+          F=$(find . -name sweet_ufs.c | head -1)
+          echo "=== ufs file: $F ==="
+          if [ -n "$F" ]; then
+            echo "=== strategy target ==="
+            grep -n "error = ufs_read_blocks(su.first_block + lba, blocks);" "$F" || echo NOTFOUND
+          fi
+          H=$(find . -name hfs_readwrite.c | head -1)
+          echo "=== hfs file: $H ==="
+          if [ -n "$H" ]; then
+            echo "=== SWEET BM3 anchor ==="
+            grep -n "SWEET BM3" "$H" || echo NOTFOUND
+            echo "=== lines 3420-3460 (tabs as ^I) ==="
+            sed -n '3420,3460p' "$H" | sed -e 's/\t/^I/g'
+            echo "=== lines 3420-3460 raw ==="
+            sed -n '3420,3460p' "$H"
+          fi
+
       - name: Build
         working-directory: dxb
         run: bash build.sh

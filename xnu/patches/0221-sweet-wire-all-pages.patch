@@ -23,7 +23,7 @@
  			for (si = 0; si < sweet_seg_count && si < 32; si++) {
  				struct vnode *svp = sweet_seg_vp[si];
  				uint64_t va = sweet_seg_va[si];
-@@ -7988,6 +8002,73 @@
+@@ -7988,6 +8002,83 @@
  							__asm__ volatile("dsb sy" ::: "memory");
  						}
  					}
@@ -91,6 +91,16 @@
 +								    (unsigned long long)(va + pos),
 +								    (unsigned)pn81, (int)pkr81);
 +							}
++							/* SWEET (R230): pmap_enter() alone leaves the CPU using
++							 * its previous translation for this VA -- V6 shows the
++							 * buffer holding real bytes while DRAM reads something
++							 * else.  Invalidate the VA explicitly so the bytes just
++							 * written are the ones that execute. */
++							__asm__ volatile("dsb sy" ::: "memory");
++							__asm__ volatile("tlbi vaae1, %0" ::
++							    "r"(((uint64_t)(va + pos)) >> 12));
++							__asm__ volatile("dsb sy" ::: "memory");
++							__asm__ volatile("isb" ::: "memory");
 +							sweet_fill_idx++;
 +						}
 +					}

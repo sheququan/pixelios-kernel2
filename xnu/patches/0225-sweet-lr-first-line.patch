@@ -16,7 +16,7 @@
  		uint64_t sweet_bt[12] = { 0 };
  		{
  			int sweet_btn = 0;
-@@ -1668,32 +1659,35 @@
+@@ -1668,32 +1659,53 @@
  		 * screen edge.  Every line below is <= ~50 chars and carries
  		 * one or two values, with the highest-value values first.
  		 */
@@ -32,41 +32,66 @@
 -		    "SWEET B3: f %#llx r %#llx\n"
 -		    "SWEET UF2: in %08x esr %#x c %#llx f %#llx",
 -		    (unsigned long long)get_saved_state_pc(state),
-+		/*
-+		 * SWEET (R85): the panic() prefix eats ~45 columns of the first
-+		 * line and the console hard-wraps mid-token at ~58 columns, so
-+		 * lr went missing twice (R83/R84 -- F141).  LR gets its own
-+		 * unprefixed line: it is blr+4 of the null call and names the
-+		 * exact blr site once mapped against the SWEET MOD dyld base.
-+		 */
+-		    (unsigned long long)get_saved_state_lr(state),
+-		    (unsigned long long)saved_state64(state)->x[0],
+-		    (unsigned long long)saved_state64(state)->x[1],
+-		    (unsigned long long)saved_state64(state)->x[2],
+-		    (unsigned long long)saved_state64(state)->x[3],
+-		    (unsigned long long)sweet_regs[2], (unsigned long long)sweet_regs[3],
+-		    (unsigned long long)sweet_regs[4], (unsigned long long)sweet_regs[5],
+-		    (unsigned long long)sweet_regs[6], (unsigned long long)sweet_regs[7],
+-		    (unsigned long long)sweet_bt[0], (unsigned long long)sweet_bt[1],
+-		    (unsigned long long)sweet_bt[2], (unsigned long long)sweet_bt[3],
+-		    (unsigned long long)sweet_bt[4], (unsigned long long)sweet_bt[5],
+-		    (unsigned long long)sweet_bt[6], (unsigned long long)sweet_bt[7],
+-		    sweet_instr, esr,
+-		    (unsigned long long)codes[0], (unsigned long long)fault_addr);
++		/* SWEET (R243): absolute PCs move with the ASLR slide, so a naked
++		 * PC cannot be mapped to a file offset.  Print PC minus both image
++		 * bases (launchd __TEXT and dyld __TEXT) and decode the ESR class,
++		 * so one screen settles "which image" and "which exception". */
++		uint64_t sb_pc = get_saved_state_pc(state);
++		uint64_t sb_main = 0, sb_dyl = 0, sb_om, sb_od;
++		int sbi;
++		{
++			extern int sweet_seg_count;
++			extern uint64_t sweet_seg_va[], sweet_seg_off[];
++
++			for (sbi = 0; sbi < sweet_seg_count && sbi < 32; sbi++) {
++				if (sweet_seg_off[sbi] != 0) {
++					continue;
++				}
++				if (sb_main == 0) {
++					sb_main = sweet_seg_va[sbi];
++				} else {
++					sb_dyl = sweet_seg_va[sbi];
++					break;
++				}
++			}
++		}
++		sb_om = sb_main ? (sb_pc - sb_main) : 0;
++		sb_od = sb_dyl ? (sb_pc - sb_dyl) : 0;
 +		panic("SWEET LR: %#llx\n"
 +		    "SWEET PC: %#llx\n"
 +		    "SWEET X0: %#llx %#llx\n"
 +		    "SWEET X2: %#llx %#llx\n"
 +		    "SWEET X8: %#llx %#llx\n"
 +		    "SWEET X9: %#llx %#llx\n"
-+		    "SWEET B0: %#llx %#llx\n"
-+		    "SWEET B1: %#llx %#llx\n"
++		    "SWEET SB: %#llx %#llx\n"
++		    "SWEET IE: ec %u fsc %u\n"
 +		    "SWEET ES: %08x %#x",
- 		    (unsigned long long)get_saved_state_lr(state),
-+		    (unsigned long long)get_saved_state_pc(state),
- 		    (unsigned long long)saved_state64(state)->x[0],
- 		    (unsigned long long)saved_state64(state)->x[1],
- 		    (unsigned long long)saved_state64(state)->x[2],
- 		    (unsigned long long)saved_state64(state)->x[3],
--		    (unsigned long long)sweet_regs[2], (unsigned long long)sweet_regs[3],
--		    (unsigned long long)sweet_regs[4], (unsigned long long)sweet_regs[5],
--		    (unsigned long long)sweet_regs[6], (unsigned long long)sweet_regs[7],
++		    (unsigned long long)get_saved_state_lr(state),
++		    (unsigned long long)sb_pc,
++		    (unsigned long long)saved_state64(state)->x[0],
++		    (unsigned long long)saved_state64(state)->x[1],
++		    (unsigned long long)saved_state64(state)->x[2],
++		    (unsigned long long)saved_state64(state)->x[3],
 +		    (unsigned long long)saved_state64(state)->x[8],
 +		    (unsigned long long)saved_state64(state)->x[16],
 +		    (unsigned long long)saved_state64(state)->x[17],
 +		    (unsigned long long)saved_state64(state)->x[23],
- 		    (unsigned long long)sweet_bt[0], (unsigned long long)sweet_bt[1],
- 		    (unsigned long long)sweet_bt[2], (unsigned long long)sweet_bt[3],
--		    (unsigned long long)sweet_bt[4], (unsigned long long)sweet_bt[5],
--		    (unsigned long long)sweet_bt[6], (unsigned long long)sweet_bt[7],
--		    sweet_instr, esr,
--		    (unsigned long long)codes[0], (unsigned long long)fault_addr);
++		    (unsigned long long)sb_om, (unsigned long long)sb_od,
++		    (unsigned)(esr >> 26), (unsigned)(esr & 0x3f),
 +		    sweet_instr, esr);
  	}
  	exception_triage(exc, codes, numcodes);

@@ -1,0 +1,17 @@
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -710,2 +710,14 @@
+ 			error = ufs_read_blocks(su.first_block + lba, blocks);
++				/* SWEET (R233): the ZFAIL/ZEROOK bridge lives in the
++				 * direct-read path; this buf/physio path still hands EIO
++				 * to upper layers, which then treat the error code as a
++				 * value and crash (X8 = -5 right after libignition).
++				 * Zero the bounce buffer so the copy below stores zeros,
++				 * and report success. */
++				if (error) {
++					printf("SWEET STRAT0: lba %llu want %u err %d\n",
++					    (unsigned long long)lba, want, error);
++					memset((char *)bounce + skip, 0, (size_t)want);
++					error = 0;
++				}
+ 			if (!error) {

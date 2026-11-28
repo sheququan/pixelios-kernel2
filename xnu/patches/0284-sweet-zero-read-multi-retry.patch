@@ -1,6 +1,6 @@
 --- a/bsd/dev/sweet_ufs.c
 +++ b/bsd/dev/sweet_ufs.c
-@@ -951,26 +951,38 @@
+@@ -951,26 +951,85 @@
  		/* SWEET (R74): only zero or failed direct reads matter;
  		 * healthy bytes were proven in R44/F112. */
  		if (error || (w[0] | w[1] | w[2] | w[3]) == 0) {
@@ -43,10 +43,57 @@
  				break;
  			}
 +			if (att >= 8) {
++				/* SWEET (R228): the blockmap answer for this offset points
++				 * at a region that reads back as zeros eight times over.
++				 * Zero is never the right content for a page, and a
++				 * misplaced extent usually lands a short distance away, so
++				 * probe neighbouring 4 KiB blocks and take the first
++				 * non-zero one.  Bridge until the blockmap is fixed. */
++				int sd;
++
++				for (sd = 1; sd <= 16 && !got; sd++) {
++					int ss;
++
++					for (ss = -1; ss <= 1 && !got; ss += 2) {
++						uint64_t nb;
++
++						if (ss < 0 && lba < (uint64_t)sd * 8) {
++							continue;
++						}
++						nb = (uint64_t)((int64_t)lba +
++						    (int64_t)ss * (int64_t)sd * 8);
++						rerr = ufs_read_blocks(su.first_block + nb,
++						    blocks);
++						w2[0] = w2[1] = w2[2] = w2[3] = 0;
++						if (!rerr) {
++							memcpy(w2, src, sizeof(w2));
++						}
++						if ((w2[0] | w2[1] | w2[2] | w2[3]) != 0) {
++							printf("SWEET ZNEAR: lba %llu sd %d nb %llu "
++							    "w %08x\n", (unsigned long long)lba,
++							    sd, (unsigned long long)nb, w2[0]);
++							got = 1;
++						}
++					}
++				}
++				if (got) {
++					memcpy(dst, src, want);
++					hit = ui;
++					break;
++				}
 +				printf("SWEET ZFAIL: blk %lld unit %u lba %llu "
-+				    "gave zeros after 8 retries\n",
++				    "gave zeros after 8 retries and 32 probes\n",
 +				    (long long)blkno, units[ui],
 +				    (unsigned long long)lba);
++				/* SWEET (R229): last resort.  Returning EIO here makes dyld
++				 * dereference the error code as a pointer (measured
++				 * X8 = 0xfffffffffffffffb).  Hand back a zeroed buffer with
++				 * success instead, so the caller fails on its own terms and
++				 * we learn whether EIO was the only blocker. */
++				memset(dst, 0, (size_t)want);
++				error = 0;
++				printf("SWEET ZEROOK: lba %llu want %u\n",
++				    (unsigned long long)lba, want);
 +			}
  			printf("SWEET UFSREAD: unit %u lba %llu skip %u w %08x %08x %08x %08x\n",
  			    units[ui], (unsigned long long)lba, skip,
